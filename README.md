@@ -11,11 +11,11 @@ mot en fullare följeslagardator (MAVLink/video/styrning över 4G senare).
 
 ```
 Hemmabas (F9P) → hemma-internet → Tailscale → 4G (mobilrouter) → Pi 3A+ (WiFi)
-   → MAVProxy ntrip → serial 921600 → Cube TELEM2 → GPS_RTCM_DATA → UM982 → RTK Fix
+   → MAVProxy ntrip → serial 921600 → Cube GPS2 → GPS_RTCM_DATA → UM982 → RTK Fix
 ```
 
-UM982-kompassen sitter kvar på **TELEM1** (orörd); companion-Pi:n hamnar på
-**TELEM2 / SERIAL2**.
+UM982-kompassen sitter på **GPS1 / SERIAL3** (orörd); companion-Pi:n på
+**GPS2 / SERIAL4**. (TELEM1 = ELRS, TELEM2 = SiK.)
 
 ## Hårdvara (PoC)
 
@@ -25,7 +25,7 @@ UM982-kompassen sitter kvar på **TELEM1** (orörd); companion-Pi:n hamnar på
   dongle/HAT direkt på Pi:n.
 * **5 V/≥3 A BEC/UBEC** från drönarbatteriet för Pi:ns ström (**inte** Cube:ns
   telem-5V).
-* 3 jumperkablar (TX/RX/GND) mellan Cube TELEM2 och Pi GPIO.
+* 3 jumperkablar (TX/RX/GND) mellan Cube GPS2 och Pi GPIO.
 
 ## Varför den här vägen
 
@@ -55,10 +55,10 @@ Full guide i [`SETUP.md`](SETUP.md). Kort:
 
 1. Flasha Pi 3A+ (Pi OS Lite, WiFi = mobilrouter, SSH på).
 2. Tailscale på Pi:n → samma tailnet som basen.
-3. Wire Cube TELEM2 ↔ Pi GPIO (TX/RX/GND), driv Pi:n från BEC.
+3. Wire Cube GPS2 ↔ Pi GPIO (TX/RX/GND), driv Pi:n från BEC.
 4. Frigör Pi-UART:en (`disable-bt`, stäng serie-konsol).
 5. Installera MAVProxy, testa `ntrip`-modulen mot `homebase/LOCAL`.
-6. Cube: `SERIAL2_PROTOCOL=2`, `SERIAL2_BAUD=921`.
+6. Cube: `SERIAL4_PROTOCOL=2`, `SERIAL4_BAUD=921` (GPS2-porten).
 7. När allt funkar: aktivera `systemd/mavproxy-ntrip.service`.
 
 ## Telemetri över 4G (Mission Planner via Tailscale)

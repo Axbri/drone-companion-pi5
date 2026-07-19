@@ -17,7 +17,7 @@ Kompanjon till [`README.md`](README.md). Matar från hemmabasen
 | Raspberry Pi 3 Model A+ | 512 MB, WiFi, GPIO-UART — räcker gott |
 | Mobil 4G-router (WiFi, batteri) | Pi:n ansluter via WiFi; monteras på drönaren |
 | 5 V/≥3 A BEC/UBEC | Pi:ns ström från drönarbatteriet — **inte** Cube:ns telem-5V |
-| 3× jumperkablar | TX/RX/GND mellan Cube TELEM2 och Pi GPIO |
+| 3× jumperkablar | TX/RX/GND mellan Cube GPS2 och Pi GPIO |
 
 ## 1. Flasha Pi:n
 
@@ -40,19 +40,24 @@ ping homebase              # ska svara → MagicDNS funkar
 
 Nu når Pi:n `homebase:2101/LOCAL` var den än är (över 4G).
 
-## 3. Serial-wiring: Cube TELEM2 → Pi GPIO
+## 3. Serial-wiring: Cube GPS2 → Pi GPIO
 
-Cube TELEM2 är JST-GH 6-pin. Koppla **korsat** TX↔RX + gemensam jord:
+Companion-Pi:n sitter på Cubens **GPS2-port** (= SERIAL4). JST-GH 6-pin, koppla
+**korsat** TX↔RX + gemensam jord:
 
-| Cube TELEM2 | → | Pi (Model A+) |
+| Cube GPS2 | → | Pi (Model A+) |
 |---|---|---|
 | pin 2 (TX) | → | **RXD** GPIO15 — phys pin 10 |
 | pin 3 (RX) | → | **TXD** GPIO14 — phys pin 8 |
 | pin 6 (GND) | → | GND — phys pin 6 |
-| pin 1 (5V), CTS, RTS | | **lämna okopplade** |
+| pin 1 (5V), I2C (pin 4/5) | | **lämna okopplade** |
 
 Båda sidor är 3.3 V TTL → säkert utan nivåomvandlare. Driv Pi:n från BEC:en, inte
 från Cube:ns 5V.
+
+> **Portöversikt (faktisk):** GPS2/SERIAL4 = companion-Pi (denna guide) · GPS1/SERIAL3 =
+> UM982-kompassen (se [`UM982-GPS-CONFIG.md`](UM982-GPS-CONFIG.md)) · TELEM1 = ELRS ·
+> TELEM2 = SiK. (TELEM2 användes tillfälligt under felsökningen, men Pi:n bor på GPS2.)
 
 ## 4. Frigör Pi:ns UART
 
@@ -113,18 +118,18 @@ Du ska också se heartbeats från Cube:n i konsolen (serial-länken frisk).
 
 ## 6. Cube-parametrar (Mission Planner)
 
-På TELEM2 = SERIAL2:
+På **GPS2 = SERIAL4**:
 ```
-SERIAL2_PROTOCOL = 2      # MAVLink2
-SERIAL2_BAUD     = 921    # 921600
+SERIAL4_PROTOCOL = 2      # MAVLink2
+SERIAL4_BAUD     = 921    # 921600
 ```
-UM982-kompassen på TELEM1/SERIAL1 lämnas orörd.
+UM982-kompassen på **GPS1/SERIAL3** lämnas orörd (dess konfig: [`UM982-GPS-CONFIG.md`](UM982-GPS-CONFIG.md)).
 
 **Felsökning** om ingen data/flaky länk:
-- Stäng av flödeskontroll på TELEM2 (bara TX/RX/GND draget): sätt porten till
-  `BRD_SERx_RTSCTS = 0` (rätt index för TELEM2 på din Cube).
-- Sänk baud: `SERIAL2_BAUD = 115` (115200) och `--baudrate 115200` i MAVProxy.
-- Dubbelkolla att TX/RX inte är omkastade.
+- GPS2-porten drar bara TX/RX/GND (ingen flödeskontroll); vid strul, säkerställ att
+  flödeskontroll är av på porten (`BRD_SERx_RTSCTS = 0`, rätt index för din Cube).
+- Sänk baud: `SERIAL4_BAUD = 115` (115200) och `--baudrate 115200` i MAVProxy.
+- Dubbelkolla att TX/RX inte är omkastade (Cube-TX/GPS2 pin 2 → Pi-RX/pin 10).
 
 ## 7. Autostart vid boot
 
