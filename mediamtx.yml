@@ -1,0 +1,38 @@
+# mediamtx-config för dronepi — RTSP-stream av CSI-kameran (OV5647) som
+# Mission Planner HUD-bakgrund. Läggs på Pi:n som /home/axel/mediamtx.yml
+# (dronecam.service pekar dit). Bara RTSP behövs → övriga protokoll av.
+#
+# Kameran kör ON-DEMAND: hårdvaru-H.264-encodern startar först när en klient
+# (MP) ansluter till rtsp://dronepi:8554/cam, och stängs 10 s efter att sista
+# tittaren kopplat bort → noll CPU/ström när ingen tittar (viktigt på Pi 3A+).
+
+logLevel: info
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+paths:
+  cam:
+    source: rpiCamera
+    # Full-sensor-läget (2x2-binnat, 4:3) för FULL synvinkel — OV5647:s 16:9-lägen
+    # (t.ex. 1080p) är centrumbeskurna → smal bild. Utmatning i 4:3 (1280x960) matchar
+    # både sensorns 4:3-läge (ingen beskärning, full FOV i bägge led) och MP:s 4:3-HUD
+    # (ingen ihoptryckning/distorsion).
+    rpiCameraMode: "1296:972:10:P"
+    rpiCameraWidth: 1280
+    rpiCameraHeight: 960
+    rpiCameraFPS: 10
+    # MANUELL exponering — auto-exponeringen (AGC) svängde ~1 Hz utomhus och
+    # blinkade helvitt (översväng i starkt ljus, förvärrat av att fps=10 klampar
+    # max slutartid). Fast slutartid+gain = ingen AGC-loop = ingen blinkning.
+    # Tuning: rpiCameraShutter i µs — HÖGRE = ljusare. ~2000 (1/500s) för dagsljus;
+    # sänk mot 500-1000 om det ändå klipper vitt, höj mot 4000-8000 i skugga/moln.
+    rpiCameraShutter: 4000
+    rpiCameraGain: 1.0
+    rpiCameraBitrate: 1500000
+    # IDR (keyframe) var 10:e frame ≈ 1 s vid 10 fps. Default är 60 frames = 6 s vid
+    # 10 fps → bilden blev "utsmetad/pixlig" i ~flera s efter varje paketförlust. Kort
+    # IDR-period = snabb återhämtning + klienter kan ansluta mitt i strömmen.
+    rpiCameraIDRPeriod: 10       # ~1.5 Mbps — 4G-vänligt vid 1280x960/10fps
+    sourceOnDemand: yes
+    sourceOnDemandCloseAfter: 10s

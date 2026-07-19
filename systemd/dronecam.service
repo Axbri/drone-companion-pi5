@@ -1,0 +1,29 @@
+# dronecam — mediamtx RTSP-stream av Pi-kameran (CSI OV5647) för Mission
+# Planners HUD-bakgrund. Fristående från mavproxy-ntrip (rör inte serieporten).
+# Streamen är rtsp://dronepi:8554/cam, 720p HW-H.264, on-demand.
+#
+# Förkrav på Pi:n:
+#   - CSI-kamera igenkänd av libcamera (rpicam-hello --list-cameras)
+#   - användaren i grupperna 'video' + 'render' (kameraåtkomst)
+#   - mediamtx-binären i /usr/local/bin (ladda ner ARM64-release från
+#     github.com/bluenviron/mediamtx), config i /home/<user>/mediamtx.yml
+#
+# Install:
+#   sudo install -m 644 systemd/dronecam.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now dronecam
+
+[Unit]
+Description=dronecam - mediamtx RTSP camera stream for Mission Planner HUD
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=axel
+WorkingDirectory=/home/axel
+ExecStart=/usr/local/bin/mediamtx /home/axel/mediamtx.yml
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

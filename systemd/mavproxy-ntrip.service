@@ -1,0 +1,42 @@
+# MAVProxy NTRIP->MAVLink bridge — injects RTK corrections (RTCM) from the home
+# base (homebase/LOCAL over Tailscale) into the Cube over serial as GPS_RTCM_DATA,
+# AND serves MAVLink telemetry over TCP (--out tcpin:0.0.0.0:5760) so a GCS like
+# Mission Planner can connect over 4G/Tailscale (TCP → dronepi:5760).
+# Starts at boot so no laptop/SiK is needed in the field.
+#
+# As deployed: Pi on Cube GPS2 = SERIAL4 (SERIAL4_PROTOCOL=2, SERIAL4_BAUD=921).
+# (TELEM2/SERIAL2 works equally well; that port has flow control — set its
+#  BRD_SERx_RTSCTS=0 if only TX/RX/GND are wired.)
+#
+# Adjust before installing:
+#   - User=            your Pi login user
+#   - WorkingDirectory a dir that User can WRITE (MAVProxy writes mav.tlog there;
+#                      without this it fails under systemd with "Permission denied: mav.tlog")
+#   - ExecStart path   to wherever mavproxy.py lives (venv or pipx)
+#   - caster/mount     swap to rtk2go.com / Pryssgarden / <your-email> for RTK2Go fallback
+#
+# Install:
+#   sudo install -m 644 systemd/mavproxy-ntrip.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mavproxy-ntrip
+
+[Unit]
+Description=MAVProxy NTRIP->MAVLink RTK bridge (Cube GPS2/SERIAL4)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=axel
+WorkingDirectory=/home/axel
+# UDP (udpin:14550) is the smooth realtime path for a GCS (no TCP head-of-line
+# blocking over 4G); tcpin:5760 kept as a reliable fallback. --streamrate 10 lifts
+# the HUD/attitude update rate from MAVProxy's default 4 Hz.
+ExecStart=/home/axel/mavproxy-venv/bin/mavproxy.py \
+    --master=/dev/serial0 --baudrate 921600 \
+    --out tcpin:0.0.0.0:5760 --out udpin:0.0.0.0:14550 --streamrate 10 --daemon \
+    --cmd="module load ntrip; ntrip set caster homebase; ntrip set port 2101; ntrip set mountpoint LOCAL; ntrip set username anon; ntrip set password anon; ntrip start"
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

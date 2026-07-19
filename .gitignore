@@ -1,0 +1,14 @@
+# Editor / OS-brus
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Stora / efemära filer — hör inte hemma i repot
+*.img
+*.img.gz
+*.tlog
+*.bin
