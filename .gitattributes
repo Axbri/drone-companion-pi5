@@ -1,0 +1,6 @@
+# Filerna deployas till en Linux-Pi (dronepi). Tvinga LF i arbetskopian så att en
+# utcheckning på Windows inte injicerar CRLF i .py/.service/.sh/.sudoers-filer
+# (CRLF bryter shebang, systemd-units och sudoers).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
