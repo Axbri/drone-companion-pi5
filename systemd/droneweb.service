@@ -1,0 +1,29 @@
+# droneweb — companion web UI on dronepi: camera video (MJPEG) + MAVLink telemetry
+# (battery/attitude/heading) + Pi performance (CPU/RAM/net/temp) + shutdown button,
+# and (step 2) ArUco precision-landing. Owns the IMX219 camera (replaces mediamtx/
+# dronecam.service — disable that: `sudo systemctl disable --now dronecam`).
+#
+# Reachable over LAN/Tailscale at http://dronepi:8080 (no auth — trusted network).
+# Reads telemetry from mavproxy's udpin:127.0.0.1:14551 (see mavproxy-ntrip.service).
+#
+# Install:
+#   sudo install -m 644 systemd/droneweb.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now droneweb
+# Needs: ~/droneweb-venv (--system-site-packages, pip pymavlink), app in ~/droneweb/,
+#        and /etc/sudoers.d/droneweb for the shutdown button.
+
+[Unit]
+Description=droneweb - companion web UI (video + telemetry + Pi stats)
+After=network-online.target mavproxy-ntrip.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=axel
+WorkingDirectory=/home/axel/droneweb
+ExecStart=/home/axel/droneweb-venv/bin/python /home/axel/droneweb/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -31,9 +31,11 @@ WorkingDirectory=/home/axel
 # UDP (udpin:14550) is the smooth realtime path for a GCS (no TCP head-of-line
 # blocking over 4G); tcpin:5760 kept as a reliable fallback. --streamrate 10 lifts
 # the HUD/attitude update rate from MAVProxy's default 4 Hz.
+# udpin:127.0.0.1:14551 is a local-only endpoint for the droneweb companion web UI
+# (telemetry read + LANDING_TARGET inject); separate from the GCS port 14550.
 ExecStart=/home/axel/mavproxy-venv/bin/mavproxy.py \
     --master=/dev/serial0 --baudrate 921600 \
-    --out tcpin:0.0.0.0:5760 --out udpin:0.0.0.0:14550 --streamrate 10 --daemon \
+    --out tcpin:0.0.0.0:5760 --out udpin:0.0.0.0:14550 --out udpin:127.0.0.1:14551 --streamrate 10 --daemon \
     --cmd="module load ntrip; ntrip set caster homebase; ntrip set port 2101; ntrip set mountpoint LOCAL; ntrip set username anon; ntrip set password anon; ntrip start"
 Restart=on-failure
 RestartSec=10

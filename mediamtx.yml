@@ -22,13 +22,12 @@ paths:
     rpiCameraWidth: 1280
     rpiCameraHeight: 960
     rpiCameraFPS: 10
-    # MANUELL exponering — auto-exponeringen (AGC) svängde ~1 Hz utomhus och
-    # blinkade helvitt (översväng i starkt ljus, förvärrat av att fps=10 klampar
-    # max slutartid). Fast slutartid+gain = ingen AGC-loop = ingen blinkning.
-    # Tuning: rpiCameraShutter i µs — HÖGRE = ljusare. ~2000 (1/500s) för dagsljus;
-    # sänk mot 500-1000 om det ändå klipper vitt, höj mot 4000-8000 i skugga/moln.
-    rpiCameraShutter: 4000
-    rpiCameraGain: 1.0
+    # AUTO-exponering (rpiCameraShutter/Gain = 0 → auto). OBS: utomhus i starkt
+    # ljus kan AGC:n oscillera och blinka helvitt ~1 Hz (förvärrat av pinnad fps=10).
+    # Får du blink → gå tillbaka till FAST exponering: rpiCameraShutter ~2000-5000 µs
+    # (HÖGRE = ljusare) + rpiCameraGain 1.0.
+    rpiCameraShutter: 0
+    rpiCameraGain: 0
     rpiCameraBitrate: 1500000
     # IDR (keyframe) var 10:e frame ≈ 1 s vid 10 fps. Default är 60 frames = 6 s vid
     # 10 fps → bilden blev "utsmetad/pixlig" i ~flera s efter varje paketförlust. Kort

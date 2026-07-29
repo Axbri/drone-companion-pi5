@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>dronepi</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <div class="brand">🚁 dronepi</div>
+    <div class="status">
+      <span id="link" class="pill pill-bad">MAVLink</span>
+      <span id="mode" class="pill">—</span>
+      <span id="armed" class="pill">DISARMED</span>
+    </div>
+    <button id="shutdown" class="btn-danger">Stäng av Pi</button>
+  </header>
+
+  <main>
+    <section class="video-wrap">
+      <img id="video" src="/video.mjpg" alt="kameravideo">
+      <canvas id="adi" class="adi" width="150" height="150"></canvas>
+      <div id="video-hint" class="video-hint">Ansluter till kameran…</div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2>Batteri</h2>
+        <div class="big"><span id="volt">–</span> V</div>
+        <div class="row"><span>Ström</span><b><span id="curr">–</span> A</b></div>
+        <div class="row"><span>Kvar</span><b><span id="batt">–</span> %</b></div>
+        <div class="bar"><div id="batt-bar" class="bar-fill"></div></div>
+      </div>
+
+      <div class="card">
+        <h2>Attityd</h2>
+        <div class="row"><span>Roll</span><b><span id="roll">–</span>°</b></div>
+        <div class="row"><span>Pitch</span><b><span id="pitch">–</span>°</b></div>
+        <div class="row"><span>Heading</span><b><span id="hdg">–</span>°</b></div>
+        <div class="row"><span>Höjd</span><b><span id="alt">–</span> m</b></div>
+        <div class="row"><span>GPS</span><b><span id="gps">–</span></b></div>
+      </div>
+
+      <div class="card">
+        <h2>Raspberry Pi</h2>
+        <div class="row"><span>CPU</span><b><span id="cpu">–</span> %</b></div>
+        <div class="bar"><div id="cpu-bar" class="bar-fill"></div></div>
+        <div class="row"><span>RAM</span><b><span id="mem">–</span></b></div>
+        <div class="bar"><div id="mem-bar" class="bar-fill"></div></div>
+        <div class="row"><span>Nät ↓/↑</span><b><span id="net">–</span> kbit/s</b></div>
+        <div class="row"><span>Temp</span><b><span id="temp">–</span> °C</b></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

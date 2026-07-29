@@ -1,0 +1,6 @@
+# Låter droneweb-webbappen (körs som axel) stänga av Pi:n via avstängningsknappen.
+# Enda tillåtna kommandot — inget annat root-privilegium ges.
+# Installera:
+#   sudo install -m 440 -o root -g root droneweb.sudoers /etc/sudoers.d/droneweb
+#   sudo visudo -c        # verifiera syntax
+axel ALL=(root) NOPASSWD: /sbin/shutdown

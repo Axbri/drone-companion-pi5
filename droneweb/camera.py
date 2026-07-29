@@ -1,0 +1,129 @@
+"""IMX219-kamera via picamera2 för droneweb.
+
+Äger kameran (libcamera tillåter bara en process). Två strömmar:
+  - main  (4:3, webbvideo) → MJPEGEncoder (HW) → StreamingOutput → /video.mjpg
+  - lores (640x480 YUV420) → Y-planet = gråskala för ArUco-CV (Steg 2)
+
+On-demand via referensräkning:
+  - "hold"   håller kameran igång (video-tittare + CV-hold i Steg 2)
+  - "viewer" håller MJPEG-encodern igång (bara när någon tittar på videon)
+Så när ingen tittar och CV är av → kameran stoppas helt (spar CPU/ström på Pi 3A+).
+"""
+import io
+import threading
+
+from picamera2 import Picamera2
+from picamera2.encoders import MJPEGEncoder
+from picamera2.outputs import FileOutput
+
+MAIN_SIZE = (1024, 768)   # 4:3, full FOV (IMX219 är 4:3)
+LORES_SIZE = (640, 480)   # gråskala-Y för CV
+FPS = 15
+
+
+class StreamingOutput(io.BufferedIOBase):
+    """Tar emot JPEG-frames från MJPEGEncoder och delar senaste till läsare."""
+
+    def __init__(self):
+        self.frame = None
+        self.condition = threading.Condition()
+
+    def writable(self):
+        return True
+
+    def write(self, buf):
+        with self.condition:
+            self.frame = buf
+            self.condition.notify_all()
+
+
+class Camera:
+    def __init__(self):
+        self._picam2 = Picamera2()
+        cfg = self._picam2.create_video_configuration(
+            main={"size": MAIN_SIZE, "format": "YUV420"},
+            lores={"size": LORES_SIZE, "format": "YUV420"},
+            controls={"FrameRate": FPS},
+        )
+        self._picam2.configure(cfg)
+        self._output = StreamingOutput()
+        self._lock = threading.Lock()
+        self._holds = 0      # allt som behöver kameran igång
+        self._viewers = 0    # MJPEG-tittare (behöver encodern)
+        self._started = False
+        self._encoding = False
+
+    # ---- referensräkning ------------------------------------------------
+    def _acquire_hold(self):
+        with self._lock:
+            self._holds += 1
+            if not self._started:
+                self._picam2.start()
+                self._started = True
+
+    def _release_hold(self):
+        with self._lock:
+            self._holds = max(0, self._holds - 1)
+            if self._holds == 0 and self._started:
+                if self._encoding:
+                    self._picam2.stop_encoder()
+                    self._encoding = False
+                self._picam2.stop()
+                self._started = False
+
+    def _acquire_viewer(self):
+        self._acquire_hold()
+        with self._lock:
+            self._viewers += 1
+            if not self._encoding:
+                self._picam2.start_encoder(
+                    MJPEGEncoder(), FileOutput(self._output), name="main"
+                )
+                self._encoding = True
+
+    def _release_viewer(self):
+        with self._lock:
+            self._viewers = max(0, self._viewers - 1)
+            if self._viewers == 0 and self._encoding:
+                self._picam2.stop_encoder()
+                self._encoding = False
+        self._release_hold()
+
+    # ---- publikt API ----------------------------------------------------
+    def frames(self):
+        """Generator: JPEG-bytes för MJPEG-strömmen. Startar/stoppar on-demand."""
+        self._acquire_viewer()
+        try:
+            while True:
+                with self._output.condition:
+                    if not self._output.condition.wait(timeout=5):
+                        continue
+                    frame = self._output.frame
+                if frame:
+                    yield frame
+        finally:
+            self._release_viewer()
+
+    def cv_hold(self):
+        """Kontexthanterare som håller kameran igång för CV (Steg 2)."""
+        cam = self
+
+        class _Hold:
+            def __enter__(self):
+                cam._acquire_hold()
+                return cam
+
+            def __exit__(self, *a):
+                cam._release_hold()
+
+        return _Hold()
+
+    def capture_gray(self):
+        """Gråskalebild (Y-planet ur lores YUV420) för ArUco. Kräver aktiv hold."""
+        yuv = self._picam2.capture_array("lores")
+        h, w = LORES_SIZE[1], LORES_SIZE[0]
+        return yuv[:h, :w]
+
+    @property
+    def viewers(self):
+        return self._viewers
