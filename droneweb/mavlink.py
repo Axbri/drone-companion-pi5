@@ -21,6 +21,7 @@ class MavlinkTelemetry:
         self.url = url
         self._data = {}
         self._lock = threading.Lock()
+        self._send_lock = threading.Lock()   # serialisera sändningar (flera trådar)
         self.master = None
         self._connected = False
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -50,11 +51,12 @@ class MavlinkTelemetry:
                 time.sleep(2)  # reconnecta
 
     def _send_heartbeat(self):
-        self.master.mav.heartbeat_send(
-            mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER,
-            mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-            0, 0, 0,
-        )
+        with self._send_lock:
+            self.master.mav.heartbeat_send(
+                mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER,
+                mavutil.mavlink.MAV_AUTOPILOT_INVALID,
+                0, 0, 0,
+            )
 
     def _handle(self, msg):
         t = msg.get_type()
@@ -94,13 +96,28 @@ class MavlinkTelemetry:
             return out
 
     def send_landing_target(self, angle_x, angle_y, distance):
-        """Steg 2: skicka LANDING_TARGET (vinklar i rad, avstånd i m)."""
+        """Steg 2: skicka LANDING_TARGET (vinklar i rad i kroppsframe, avstånd i m)."""
         if self.master is None:
             return
-        self.master.mav.landing_target_send(
-            int(time.time() * 1e6),  # time_usec
-            0,                        # target_num
-            mavutil.mavlink.MAV_FRAME_BODY_FRD,
-            float(angle_x), float(angle_y), float(distance),
-            0.0, 0.0,                 # size_x, size_y
-        )
+        with self._send_lock:
+            self.master.mav.landing_target_send(
+                int(time.time() * 1e6),  # time_usec
+                0,                        # target_num
+                mavutil.mavlink.MAV_FRAME_BODY_FRD,
+                float(angle_x), float(angle_y), float(distance),
+                0.0, 0.0,                 # size_x, size_y
+            )
+
+    def send_distance_sensor(self, cm, min_cm=10, max_cm=800):
+        """Relä TF-Luna AGL till FC (nedåtriktad laser)."""
+        if self.master is None:
+            return
+        with self._send_lock:
+            self.master.mav.distance_sensor_send(
+                int(time.time() * 1000) & 0xFFFFFFFF,  # time_boot_ms
+                int(min_cm), int(max_cm), int(cm),
+                mavutil.mavlink.MAV_DISTANCE_SENSOR_LASER,
+                1,                                       # id
+                mavutil.mavlink.MAV_SENSOR_ROTATION_PITCH_270,  # nedåt = 25
+                0,                                       # covariance
+            )

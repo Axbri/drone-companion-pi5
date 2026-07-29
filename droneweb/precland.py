@@ -11,6 +11,8 @@ app.py (som har AGL från rangefinder.py och mavlink-anslutningen).
 Modulen är fristående testbar:  python precland.py <bild> [målstorlek_px]
 """
 import math
+import threading
+import time
 
 import cv2
 import numpy as np
@@ -112,6 +114,115 @@ class PrecLandDetector:
             cv2.putText(bgr, "  ".join(hud), (8, 22),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         return bgr
+
+
+# ---- kamera-montering → kroppsframe (BODY_FRD) -------------------------
+# MÅSTE verifieras på bänk/i flygning: flytta målet mot nosen → body_x ska bli
+# positiv; mot höger → body_y positiv. Antagande: bildens överkant = drönarnos,
+# bildens höger = drönarens höger. Ändra här om kameran är monterad annorlunda.
+def image_to_body(ax_img, ay_img):
+    body_x = -ay_img   # mål mot bild-topp (ay<0) = framåt (+x)
+    body_y = ax_img    # mål mot bild-höger (ax>0) = höger (+y)
+    return body_x, body_y
+
+
+class PrecLandController:
+    """Kör CV-loopen när precland är armerat: väljer fas efter AGL, detekterar,
+    skickar LANDING_TARGET (utom i RTK-fasen), och matar annoterad video."""
+
+    RATE_HZ = 12
+    ARUCO_MAX_AGL = 3.5   # m — under detta föredras ArUco framför färg
+    RTK_AGL = 0.5         # m — under detta: sluta skicka, RTK håller x/y
+
+    def __init__(self, cam, tel, rangefinder=None):
+        self.cam, self.tel, self.rf = cam, tel, rangefinder
+        self.det = PrecLandDetector()
+        self._armed = False
+        self._thread = None
+        self._st_lock = threading.Lock()
+        self._status = {"phase": None, "source": None, "agl": None,
+                        "offset": None, "tx": 0, "sent": False}
+
+    @property
+    def armed(self):
+        return self._armed
+
+    def arm(self):
+        if self._armed:
+            return
+        self._armed = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def disarm(self):
+        self._armed = False
+
+    def get_status(self):
+        with self._st_lock:
+            s = dict(self._status)
+        s["armed"] = self._armed
+        rf = self.rf.status() if self.rf else {"ok": False}
+        s["rangefinder_ok"] = rf.get("ok", False)
+        return s
+
+    def _run(self):
+        with self.cam.cv_hold():
+            self.cam.set_external_source(True)
+            tx = 0
+            try:
+                while self._armed:
+                    t0 = time.time()
+                    tx = self._tick(tx)
+                    time.sleep(max(0.0, 1.0 / self.RATE_HZ - (time.time() - t0)))
+            finally:
+                self.cam.set_external_source(False)
+
+    def _tick(self, tx):
+        yuv = self.cam.capture_lores()
+        gray = yuv[:CV_H, :CV_W]
+        bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV420p2BGR)
+        agl = self.rf.agl() if self.rf else None
+
+        aruco = self.det.detect_aruco(gray)
+        phase, target = self._decide(agl, aruco, bgr)
+
+        sent = False
+        if target is not None and phase != PHASE_RTK and self._armed:
+            ax, ay = target.angles()
+            bx, by = image_to_body(ax, ay)
+            self.tel.send_landing_target(bx, by, agl if agl else 0.0)
+            sent = True
+            tx += 1
+
+        out = self.det.annotate(bgr, target, phase=phase, agl=agl)
+        ok, jpg = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        if ok:
+            self.cam.push_frame(jpg.tobytes())
+
+        off = None
+        if target is not None:
+            ox, oy = target.offset_norm()
+            off = [round(ox, 3), round(oy, 3)]
+        with self._st_lock:
+            self._status.update(
+                phase=phase, source=(target.source if target else None),
+                agl=(round(agl, 2) if agl is not None else None),
+                offset=off, tx=tx, sent=sent,
+            )
+        return tx
+
+    def _decide(self, agl, aruco, bgr):
+        # detektionsbaserad fas om ingen AGL (t.ex. bänktest utan TF-Luna)
+        if agl is None:
+            if aruco is not None:
+                return PHASE_ARUCO, aruco
+            return PHASE_COLOR, self.det.detect_color(bgr)
+        # höjdstyrd fas
+        if agl < self.RTK_AGL:
+            return PHASE_RTK, None
+        if aruco is not None and agl < self.ARUCO_MAX_AGL:
+            return PHASE_ARUCO, aruco
+        return PHASE_COLOR, self.det.detect_color(bgr)
 
 
 # ---- fristående test ---------------------------------------------------

@@ -52,6 +52,7 @@ class Camera:
         self._viewers = 0    # MJPEG-tittare (behöver encodern)
         self._started = False
         self._encoding = False
+        self._external = False   # precland matar videon (annoterade frames)
 
     # ---- referensräkning ------------------------------------------------
     def _acquire_hold(self):
@@ -75,7 +76,7 @@ class Camera:
         self._acquire_hold()
         with self._lock:
             self._viewers += 1
-            if not self._encoding:
+            if not self._encoding and not self._external:
                 self._picam2.start_encoder(
                     MJPEGEncoder(), FileOutput(self._output), name="main"
                 )
@@ -123,6 +124,31 @@ class Camera:
         yuv = self._picam2.capture_array("lores")
         h, w = LORES_SIZE[1], LORES_SIZE[0]
         return yuv[:h, :w]
+
+    def capture_lores(self):
+        """Rå lores YUV420-array (för CV: Y-plan = gråskala, cvtColor→BGR för färg).
+        Kräver aktiv hold."""
+        return self._picam2.capture_array("lores")
+
+    def push_frame(self, jpeg_bytes):
+        """Skriv en färdig JPEG till videoströmmen (precland-annoterad bild)."""
+        with self._output.condition:
+            self._output.frame = jpeg_bytes
+            self._output.condition.notify_all()
+
+    def set_external_source(self, on):
+        """on: stäng HW-MJPEG-encodern och låt push_frame() mata videon (precland-läge).
+        off: återuppta HW-MJPEG om det finns tittare."""
+        with self._lock:
+            self._external = bool(on)
+            if on and self._encoding:
+                self._picam2.stop_encoder()
+                self._encoding = False
+            elif not on and self._viewers > 0 and self._started and not self._encoding:
+                self._picam2.start_encoder(
+                    MJPEGEncoder(), FileOutput(self._output), name="main"
+                )
+                self._encoding = True
 
     @property
     def viewers(self):

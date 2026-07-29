@@ -116,7 +116,40 @@ $("shutdown").addEventListener("click", async () => {
   }
 });
 
+// ---- precisionslandning ------------------------------------------------
+let plArmed = false;
+const plBtn = $("pl-arm"), plCard = $("precland-card");
+
+async function pollPrecland() {
+  try {
+    const p = await (await fetch("/api/precland", { cache: "no-store" })).json();
+    plArmed = !!p.armed;
+    plBtn.textContent = plArmed ? "Avaktivera" : "Aktivera";
+    plBtn.classList.toggle("armed", plArmed);
+    plCard.classList.toggle("armed", plArmed);
+    $("pl-phase").textContent = p.phase || (plArmed ? "…" : "av");
+    $("pl-source").textContent = p.source || "–";
+    $("pl-agl").textContent = p.agl != null ? Number(p.agl).toFixed(2) : "–";
+    $("pl-offset").textContent = p.offset ? `${p.offset[0]}, ${p.offset[1]}` : "–";
+    $("pl-tx").textContent = p.sent ? `skickar (${p.tx})` : (p.tx ? `paus (${p.tx})` : "–");
+    $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "ingen";
+  } catch (e) {}
+}
+
+plBtn.addEventListener("click", async () => {
+  const want = !plArmed;
+  if (want && !confirm("Aktivera precisionslandning?\n\nPi:n börjar skicka LANDING_TARGET till ArduPilot när ett mål syns. Använd bara vid landning över plattan.")) return;
+  try {
+    await fetch("/api/precland", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ armed: want }),
+    });
+    pollPrecland();
+  } catch (e) { alert("Fel: " + e); }
+});
+
 // ---- loop --------------------------------------------------------------
 drawADI(0, 0);
 pollTelemetry(); setInterval(pollTelemetry, 200);
 pollStats(); setInterval(pollStats, 1000);
+pollPrecland(); setInterval(pollPrecland, 500);

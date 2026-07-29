@@ -130,6 +130,20 @@ main {
   transition: width 0.4s ease, background 0.4s ease;
 }
 
+.btn-arm {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 9px;
+  border: 0;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--good);
+  color: #06210d;
+}
+.btn-arm.armed { background: var(--bad); color: #fff; }
+#precland-card.armed { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad) inset; }
+
 @media (max-width: 720px) {
   main { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
   .panel { flex-direction: row; flex-wrap: wrap; border-left: 0; border-top: 1px solid var(--line); }

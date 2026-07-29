@@ -9,7 +9,7 @@ import subprocess
 import time
 
 import psutil
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, Response, jsonify, render_template, request
 
 from camera import Camera
 from mavlink import MavlinkTelemetry
@@ -17,6 +17,18 @@ from mavlink import MavlinkTelemetry
 app = Flask(__name__)
 cam = Camera()
 tel = MavlinkTelemetry()
+
+# precland skapas lazy vid första arm → cv2 importeras först då (sparar RAM i Steg 1)
+_precland = None
+
+
+def _get_precland():
+    global _precland
+    if _precland is None:
+        from precland import PrecLandController
+        from rangefinder import RangeFinder
+        _precland = PrecLandController(cam, tel, RangeFinder(tel))
+    return _precland
 
 _NET_IFACE = "wlan0"
 _net = {"t": time.time(), "rx": None, "tx": None}  # baseline sätts vid första pollen
@@ -84,6 +96,17 @@ def _vcgen_temp():
 def api_shutdown():
     subprocess.Popen(["sudo", "/sbin/shutdown", "-h", "now"])
     return jsonify({"status": "shutting down"})
+
+
+@app.route("/api/precland", methods=["GET", "POST"])
+def api_precland():
+    if request.method == "POST":
+        want = request.get_json(force=True, silent=True) or {}
+        pc = _get_precland()
+        pc.arm() if want.get("armed") else pc.disarm()
+    if _precland is None:
+        return jsonify({"armed": False, "phase": None, "rangefinder_ok": False})
+    return jsonify(_precland.get_status())
 
 
 if __name__ == "__main__":
