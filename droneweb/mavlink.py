@@ -101,7 +101,9 @@ class MavlinkTelemetry:
             return
         with self._send_lock:
             self.master.mav.landing_target_send(
-                int(time.time() * 1e6),  # time_usec
+                0,                        # time_usec=0 → ArduPilot använder mottagningstid.
+                                          # Skicka INTE epok-µs: fel tidsbas kan förvirra
+                                          # precland-Kalmanfiltrets latens-kompensering.
                 0,                        # target_num
                 mavutil.mavlink.MAV_FRAME_BODY_FRD,
                 float(angle_x), float(angle_y), float(distance),
