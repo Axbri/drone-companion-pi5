@@ -41,8 +41,18 @@ ArUco tillförlitligt ~3 m (rök-testad detektering ned till ~34 px markör).
    - Obs: **IMX219-kameran ligger också på 0x10 men på bus i2c-10** (separat) → ingen krock.
 3. `smbus2` finns i `droneweb-venv`. [`droneweb/rangefinder.py`](droneweb/rangefinder.py) läser
    dist+amp (reg 0x00, 6 byte) och **reläar `DISTANCE_SENSOR`** till FC. Ogiltig läsning
-   (amp<100 för svag, **amp=0xFFFF mättad = mål för nära** t.ex. på bänk, eller dist utanför
-   0,1–8 m) → `agl()`=None (graciöst; precland kör då detektionsbaserad fas).
+   (amp<100 för svag, **amp=0xFFFF mättad**, eller dist utanför 0,1–8 m) → `agl()`=None (graciöst;
+   precland kör då detektionsbaserad fas). Verifierat: läser 0,70 m mot golv på 72 cm.
+
+**Felsökning (TF-Luna):**
+- **dist=0, amp=0xFFFF (mättad) på ett rimligt avstånd** → **optisk blockering framför linsen**
+  (skyddsfilm, kåpa, glas) eller mål i dödzonen (<0,2 m). Ta bort filmen/kåpan. (Detta var
+  fältfelet — inte kod/kabling.)
+- **`i2cdetect`/scan hittar 0x10 men dist=0** → ofta ovanstående; kontrollera även att I2C är
+  aktiverat (`ls /dev/i2c-1`) och att `i2c-dev` laddas vid boot.
+- **`agl` blinkar null fast direkt läsning funkar** → **buss-krock**: kör inte manuella i2c-läsningar
+  samtidigt som droneweb (dess rangefinder-tråd läser 0x10 kontinuerligt). Stoppa droneweb för
+  manuella sensortester.
 
 ## ArduPilot-params (sätts i Mission Planner)
 
