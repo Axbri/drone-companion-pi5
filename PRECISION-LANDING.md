@@ -128,6 +128,43 @@ cv2 laddas **lazy** vid första arm → Steg 1-RAM oförändrad. Armerat: dronew
 4. **Hovring ~3 m, armerat, INGEN LAND:** logga att korrektionerna pekar rätt.
 5. **Bevakad LAND** från låg höjd → sedan full 8 m → touchdown; jämför mot ren RTK-LAND.
 
+## Flygtest-resultat & öppna tuning-punkter (2026-07-30)
+
+Första riktiga testflygningar gjorda (manuell nedstigning i **Loiter** + **Precision-Loiter** ~3 m
+över plattan). Inspelning analyserad (`rec_20260730_162014`, 56 s: COLOR 293 rutor / ARUCO 48 / RTK-HOLD 83).
+
+**Fynd 1 — rörelseoskärpa (vibration) → detektionsbortfall på höjd.** Skärpan (Laplacian-varians)
+pendlar 70→1752 över klippet = intermittent motion blur. **COLOR-fasen: bara 22 % detekterade;
+ARUCO-fasen (nära): 100 %.** Attityd-estimatet hölls dock stabilt (roll/pitch std ~1°), så
+vibrationen sitter i kameran (hög frekvens). Orsak: **auto-exponering** väljer ibland lång slutartid
+→ vibrationen smetar ut rutan. Effektiv färg-räckvidd blev ~4–5 m (inte 8 m) p.g.a. liten platta +
+blur. *(Obs: att röda plattan renderas "blå" på låg höjd är en CV-markering, INTE vitbalansfel.)*
+
+**Fynd 2 — Precision-Loiter överkompenserar / oscillerar** vid ~3 m (kör förbi flera gånger).
+- **Uteslutet: vinkelskala.** FOV-kollen: kameran läser hela sensorn (1640×1232-läge, ScalerCrop
+  100 %) → verklig HFOV = 62,2° = exakt vad koden antar. Vinklarna är alltså rätt skalade.
+- **Tecknet är rätt** (den pendlar *runt* målet, divergerar inte bort) — `image_to_body` verifierad.
+- **Trolig orsak: latens.** CV ~8 Hz + kedjan kamera→CV(Python)→mavproxy→FC ~150–250 ms → precland
+  styr mot där plattan *var* → översläng → oscillation. Klassiskt companion-precland-problem.
+
+**Applicerad fix:** `LANDING_TARGET time_usec=0` (commit `31a89ca`) — vi skickade epok-µs, fel
+tidsbas kan förvirra precland-Kalmans latenskompensering. 0 = använd mottagningstid.
+
+**Öppna punkter (prova nästa flygning, i ordning):**
+1. **Testa med time_usec-fixen** (klar) — se om överslängen minskar.
+2. **`PLND_EST_TYPE` 0 (raw) vs 1 (Kalman)** — om Kalman översvänger p.g.a. latens kan raw vara lugnare.
+3. **Fast exponering under CV** (EJ implementerat) — picamera2 `AeEnable=False` + kort `ExposureTime`
+   (~1500–2500 µs) + gain, **bara** när CV-loopen kör (auto annars för FPV). Fryser rörelsen →
+   skarp jämn detektering → mjukare data. Störst effekt mot Fynd 1.
+4. **Höj takten / kapa latensen** (EJ implementerat) — koppla loss JPEG-encoden (~halva loop-tiden)
+   från detekt+skicka → ~12–15 Hz. Tightar reglerloopen (mot Fynd 2).
+5. **Minska vibration mekaniskt** — balansera propellrar (störst), kolla motorer/prop-skick,
+   mjukmontera FC. Kolla ArduPilots **VIBE**-logg (VibeX/Y/Z <30, clipping=0).
+6. Kamera-kalibrering (schackbräde) — valfritt, FOV är rätt; bara distorsion kvar.
+
+**Analysmetod:** spela in nästa försök → plotta CSV: `ox/oy` vs `t` (oscillationens amplitud +
+frekvens → latensbidrag), `agl` vs `t`, fas-övergångar, `sent`. Skala/period bekräftar om fixarna hjälpte.
+
 ## Uppskjutet
 
 - **Yaw-inriktning** (vrida drönaren mot markören) via RC-yaw-override — egen testiteration.
