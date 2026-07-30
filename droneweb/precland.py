@@ -21,9 +21,13 @@ import numpy as np
 ARUCO_DICT = cv2.aruco.DICT_4X4_50
 ARUCO_ID = 0
 
-# safety-orange i HSV (OpenCV H 0-180). Tunas på plats.
-ORANGE_LO = np.array([5, 120, 80], np.uint8)
-ORANGE_HI = np.array([25, 255, 255], np.uint8)
+# Röd-orange platta i HSV (OpenCV H 0-180). Uppmätt i sol: H≈0, S≈240, V≈214.
+# H ligger nära 0 → hue-wrap → två H-band (nära 0 ELLER nära 180). Hög S/V ger
+# specificitet mot grönt gräs (H~40-80). Kalibrerat 2026-07-30, tunas vid behov.
+ORANGE_H_LO = 12             # matcha H <= 12 ...
+ORANGE_H_HI = 165            # ... ELLER H >= 165 (röd-wrap)
+ORANGE_S_MIN = 130
+ORANGE_V_MIN = 90
 COLOR_MIN_AREA = 80          # px^2, minsta blob (~10 px diameter)
 
 # IMX219 full-FOV vid CV-upplösningen (approx; förfinas med kalibrering)
@@ -76,7 +80,11 @@ class PrecLandDetector:
 
     def detect_color(self, bgr):
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, ORANGE_LO, ORANGE_HI)
+        m1 = cv2.inRange(hsv, np.array([0, ORANGE_S_MIN, ORANGE_V_MIN], np.uint8),
+                              np.array([ORANGE_H_LO, 255, 255], np.uint8))
+        m2 = cv2.inRange(hsv, np.array([ORANGE_H_HI, ORANGE_S_MIN, ORANGE_V_MIN], np.uint8),
+                              np.array([179, 255, 255], np.uint8))
+        mask = cv2.bitwise_or(m1, m2)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self._kernel)
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

@@ -92,8 +92,11 @@ Läggs i param-backupen (`cube-full-params-*.param`) efter att de satts.
 
 - **Kamera→kropp-mappning** i `image_to_body()` (precland.py): flytta målet mot nosen →
   `angle_x` ska bli positiv. Rotera mappningen om kameran är monterad annorlunda. **Kritiskt.**
-- **HSV-orange** (`ORANGE_LO/HI`) + `COLOR_MIN_AREA`: tuna mot din platta i verkligt ljus så att
-  bara plattan triggar (inte annat orange). Fast exponering/AWB ger stabilast färg.
+- **HSV-färg** (`ORANGE_H_LO/HI`, `ORANGE_S_MIN`, `ORANGE_V_MIN`): kalibrerat i sol 2026-07-30 —
+  plattan avbildas som **mättad röd (H≈0, S≈240, V≈214)**, inte orange, så trösklarna använder
+  **hue-wrap** (H ≤ 12 ELLER ≥ 165) + hög S/V → separerar rent mot grönt gräs (H~40-80).
+  **Omkalibrera** vid annat ljus med `droneweb/tune_color.py` (samplar plattan via ArUco → HSV).
+  Fast exponering/AWB (picamera2-controls) ger stabilast färg om ljuset varierar mycket.
 - **Kamera-kalibrering** (schackbräde) för exakta vinklar; nu används FOV-approx.
 
 ## RAM (Pi 3A+)
