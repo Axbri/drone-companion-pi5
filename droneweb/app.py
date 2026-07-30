@@ -13,12 +13,14 @@ from flask import Flask, Response, jsonify, render_template, request
 
 from camera import Camera
 from mavlink import MavlinkTelemetry
+from rangefinder import RangeFinder
 
 app = Flask(__name__)
 cam = Camera()
 tel = MavlinkTelemetry()
+rf = RangeFinder(tel)   # alltid på: reläar TF-Luna DISTANCE_SENSOR till FC från boot (lätt, ingen cv2)
 
-# precland skapas lazy vid första arm → cv2 importeras först då (sparar RAM i Steg 1)
+# precland (cv2) skapas lazy vid första arm → cv2 importeras först då (sparar RAM i Steg 1)
 _precland = None
 
 
@@ -26,8 +28,7 @@ def _get_precland():
     global _precland
     if _precland is None:
         from precland import PrecLandController
-        from rangefinder import RangeFinder
-        _precland = PrecLandController(cam, tel, RangeFinder(tel))
+        _precland = PrecLandController(cam, tel, rf)
     return _precland
 
 _NET_IFACE = "wlan0"
@@ -105,7 +106,9 @@ def api_precland():
         pc = _get_precland()
         pc.arm() if want.get("armed") else pc.disarm()
     if _precland is None:
-        return jsonify({"armed": False, "phase": None, "rangefinder_ok": False})
+        st = rf.status()
+        return jsonify({"armed": False, "phase": None,
+                        "rangefinder_ok": st["ok"], "agl": st["agl"]})
     return jsonify(_precland.get_status())
 
 

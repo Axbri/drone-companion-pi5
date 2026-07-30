@@ -72,6 +72,13 @@ RNGFND1_MAX_CM  = 800
 
 Läggs i param-backupen (`cube-full-params-*.param`) efter att de satts.
 
+> **Två gotchas (verifierade 2026-07-30):**
+> - **`RNGFND1_TYPE=10` kräver en FC-reboot** för att MAVLink-rangefinder-backend ska
+>   initieras — annars syns inget `RANGEFINDER` och `DISTANCE_SENSOR` ignoreras.
+> - **`PLND_TYPE` måste vara `1`** (MAVLink/companion), inte 0 (=ingen källa).
+> - Verifiera från Pi:n: `RANGEFINDER` från FC ska visa TF-Lunas avstånd (t.ex. 0,69 m).
+>   droneweb reläar `DISTANCE_SENSOR` **alltid** (från boot, oberoende av precland-arm).
+
 ## Användning
 
 1. Öppna webben, flyg (piloten) drönaren över plattan.
