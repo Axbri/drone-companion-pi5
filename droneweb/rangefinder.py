@@ -14,7 +14,8 @@ except ImportError:
 
 I2C_BUS = 1
 TFLUNA_ADDR = 0x10
-MIN_CM, MAX_CM = 10, 800   # TF-Luna räckvidd (~0,1–8 m)
+MIN_CM, MAX_CM = 10, 800     # TF-Luna räckvidd (~0,1–8 m)
+AMP_MIN, AMP_SAT = 100, 0xFFFF  # amp<100=för svag, 0xFFFF=mättad → ogiltig
 
 
 class RangeFinder:
@@ -28,9 +29,12 @@ class RangeFinder:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def _read_cm(self):
-        d = self._bus.read_i2c_block_data(TFLUNA_ADDR, 0x00, 2)
-        return d[0] | (d[1] << 8)
+    def _read(self):
+        # 0x00..0x05: dist_L,dist_H, amp_L,amp_H, temp_L,temp_H
+        d = self._bus.read_i2c_block_data(TFLUNA_ADDR, 0x00, 6)
+        cm = d[0] | (d[1] << 8)
+        amp = d[2] | (d[3] << 8)
+        return cm, amp
 
     def _run(self):
         if smbus2 is None:
@@ -40,8 +44,9 @@ class RangeFinder:
             try:
                 if self._bus is None:
                     self._bus = smbus2.SMBus(I2C_BUS)
-                cm = self._read_cm()
-                valid = MIN_CM <= cm <= MAX_CM
+                cm, amp = self._read()
+                # amp<100 = för svag, 0xFFFF = mättad (mål för nära) → ogiltig
+                valid = MIN_CM <= cm <= MAX_CM and AMP_MIN <= amp < AMP_SAT
                 with self._lock:
                     self._dist_m = (cm / 100.0) if valid else None
                     self._ok = True

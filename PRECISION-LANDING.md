@@ -26,13 +26,23 @@ Se [`landing-marker/`](landing-marker/): `marker_40cm.png` (skriv ut i **40 cm**
 `DICT_4X4_50` **ID 0** (måste matcha `ARUCO_ID` i precland.py). Räckvidd @ 640×480: färg ~8 m,
 ArUco tillförlitligt ~3 m (rök-testad detektering ned till ~34 px markör).
 
-## TF-Luna (AGL via I2C)
+## TF-Luna (AGL via I2C) — verifierad setup
 
-1. Ställ TF-Luna i **I2C-läge** (default UART) med Benewakes verktyg, spara.
-2. Wire: SDA→Pi pin 3, SCL→pin 5, 5V, GND.
-3. På Pi:n: `dtparam=i2c_arm=on` i `/boot/firmware/config.txt`, reboot; `i2cdetect -y 1` → **0x10**.
-4. `smbus2` finns redan i `droneweb-venv`. [`droneweb/rangefinder.py`](droneweb/rangefinder.py)
-   läser 0x10 och **reläar `DISTANCE_SENSOR`** till FC. Saknas sensorn → `agl()` = None (graciöst).
+1. **I2C-läge på sensorn:** TF-Lunas pin5→GND sätter I2C-läge (default är UART). Verifiera
+   gärna mot en Arduino först. Wire: sensor SDA→Pi **pin 3 (GPIO2)**, SCL→**pin 5 (GPIO3)**,
+   5V, GND. (Sensorns I/O är 3,3 V — OK mot Pi:ns I2C.)
+2. **Aktivera I2C på Pi:n (TVÅ delar — bara dtparam räcker INTE):**
+   - `dtparam=i2c_arm=on` i `/boot/firmware/config.txt` (instansierar i2c-1-styrenheten).
+   - Ladda **`i2c-dev`-modulen** (skapar `/dev/i2c-1`): `echo i2c-dev | sudo tee
+     /etc/modules-load.d/i2c.conf` (består vid boot). `raspi-config nonint do_i2c 0` gör båda.
+   - **Reboot.** Verifiera: `ls /dev/i2c-1` finns; enheten svarar på **0x10** (bus 1).
+   - `axel` måste vara i **`i2c`-gruppen** (udev sätter `/dev/i2c-1` till `root:i2c` 660) —
+     annars kan droneweb (körs som axel) inte läsa. `sudo usermod -aG i2c axel` vid behov.
+   - Obs: **IMX219-kameran ligger också på 0x10 men på bus i2c-10** (separat) → ingen krock.
+3. `smbus2` finns i `droneweb-venv`. [`droneweb/rangefinder.py`](droneweb/rangefinder.py) läser
+   dist+amp (reg 0x00, 6 byte) och **reläar `DISTANCE_SENSOR`** till FC. Ogiltig läsning
+   (amp<100 för svag, **amp=0xFFFF mättad = mål för nära** t.ex. på bänk, eller dist utanför
+   0,1–8 m) → `agl()`=None (graciöst; precland kör då detektionsbaserad fas).
 
 ## ArduPilot-params (sätts i Mission Planner)
 
