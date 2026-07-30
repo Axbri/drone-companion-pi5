@@ -144,6 +144,34 @@ main {
 .btn-arm.armed { background: var(--bad); color: #fff; }
 #precland-card.armed { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad) inset; }
 
+.btn-rec {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--card);
+  color: var(--muted);
+}
+.btn-rec.recording {
+  background: var(--bad); color: #fff; border-color: var(--bad);
+  animation: blink 1s step-start infinite;
+}
+@keyframes blink { 50% { opacity: 0.55; } }
+
+.rec-list { font-size: 13px; }
+.rec-empty { color: var(--muted); }
+.rec-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid var(--line);
+}
+.rec-item .rec-name { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-item .rec-sz { color: var(--muted); }
+.rec-item a { color: var(--accent); text-decoration: none; }
+.rec-item .rec-del { color: var(--bad); cursor: pointer; background: none; border: 0; font-size: 14px; padding: 0; }
+
 @media (max-width: 720px) {
   main { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
   .panel { flex-direction: row; flex-wrap: wrap; border-left: 0; border-top: 1px solid var(--line); }

@@ -133,6 +133,53 @@ async function pollPrecland() {
     $("pl-offset").textContent = p.offset ? `${p.offset[0]}, ${p.offset[1]}` : "–";
     $("pl-tx").textContent = p.sent ? `skickar (${p.tx})` : (p.tx ? `paus (${p.tx})` : "–");
     $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "ingen";
+    updateRecBtn(p.recording);
+  } catch (e) {}
+}
+
+// ---- inspelning --------------------------------------------------------
+const recBtn = $("pl-rec");
+let recording = false;
+
+function updateRecBtn(rec) {
+  recording = !!rec;
+  recBtn.textContent = recording ? "■ Stoppa inspelning" : "● Spela in";
+  recBtn.classList.toggle("recording", recording);
+}
+
+recBtn.addEventListener("click", async () => {
+  try {
+    await fetch("/api/record", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recording: !recording }),
+    });
+    pollPrecland();
+    setTimeout(pollRecordings, 500);
+  } catch (e) { alert("Fel: " + e); }
+});
+
+async function pollRecordings() {
+  try {
+    const list = await (await fetch("/api/recordings", { cache: "no-store" })).json();
+    const el = $("rec-list");
+    if (!list.length) { el.innerHTML = '<div class="rec-empty">Inga inspelningar än</div>'; return; }
+    el.innerHTML = list.map((r) => `
+      <div class="rec-item">
+        <span class="rec-name" title="${r.name}">${r.name.replace("rec_", "")}</span>
+        <span class="rec-sz">${r.size_mb} MB</span>
+        <a href="/recordings/${r.name}.avi" download>video</a>
+        ${r.csv ? `<a href="/recordings/${r.name}.csv" download>data</a>` : ""}
+        <button class="rec-del" data-name="${r.name}" title="Radera">✕</button>
+      </div>`).join("");
+    el.querySelectorAll(".rec-del").forEach((b) =>
+      b.addEventListener("click", async () => {
+        if (!confirm("Radera inspelning " + b.dataset.name + "?")) return;
+        await fetch("/api/recordings/delete", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: b.dataset.name }),
+        });
+        pollRecordings();
+      }));
   } catch (e) {}
 }
 
@@ -153,3 +200,4 @@ drawADI(0, 0);
 pollTelemetry(); setInterval(pollTelemetry, 200);
 pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);
+pollRecordings(); setInterval(pollRecordings, 4000);

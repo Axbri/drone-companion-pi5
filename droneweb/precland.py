@@ -11,6 +11,7 @@ app.py (som har AGL från rangefinder.py och mavlink-anslutningen).
 Modulen är fristående testbar:  python precland.py <bild> [målstorlek_px]
 """
 import math
+import os
 import threading
 import time
 
@@ -134,11 +135,25 @@ def image_to_body(ax_img, ay_img):
     return body_x, body_y
 
 
+REC_DIR = "/home/axel/recordings"
+CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
+              "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent\n")
+
+
+def _f(v, nd=3):
+    if v is None:
+        return ""
+    return ("%.*f" % (nd, v)) if isinstance(v, float) else str(v)
+
+
 class PrecLandController:
-    """Kör CV-loopen när precland är armerat: väljer fas efter AGL, detekterar,
-    skickar LANDING_TARGET (utom i RTK-fasen), och matar annoterad video."""
+    """Kör CV-loopen när precland är armerat ELLER inspelning pågår: väljer fas
+    efter AGL, detekterar, skickar LANDING_TARGET (bara armerat, utom RTK-fasen),
+    matar annoterad video, och spelar in synkad video (.avi) + datalogg (.csv)."""
 
     RATE_HZ = 12
+    REC_FPS = 8           # faktisk loop-takt vid inspelning på Pi 3A+ (video-fps-metadata).
+                          # OBS: CSV:ns t-kolumn är exakt tid per ruta (ruta N = CSV-rad N).
     ARUCO_MAX_AGL = 3.5   # m — under detta föredras ArUco framför färg
     RTK_AGL = 0.5         # m — under detta: sluta skicka, RTK håller x/y
 
@@ -146,46 +161,81 @@ class PrecLandController:
         self.cam, self.tel, self.rf = cam, tel, rangefinder
         self.det = PrecLandDetector()
         self._armed = False
+        self._recording = False
         self._thread = None
+        self._tx = 0
         self._st_lock = threading.Lock()
         self._status = {"phase": None, "source": None, "agl": None,
-                        "offset": None, "tx": 0, "sent": False}
+                        "offset": None, "tx": 0, "sent": False, "rec_file": None}
 
     @property
     def armed(self):
         return self._armed
 
+    def _ensure_thread(self):
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+
     def arm(self):
-        if self._armed:
-            return
         self._armed = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        self._ensure_thread()
 
     def disarm(self):
         self._armed = False
+
+    def start_recording(self):
+        self._recording = True
+        self._ensure_thread()
+
+    def stop_recording(self):
+        self._recording = False
 
     def get_status(self):
         with self._st_lock:
             s = dict(self._status)
         s["armed"] = self._armed
+        s["recording"] = self._recording
         rf = self.rf.status() if self.rf else {"ok": False}
         s["rangefinder_ok"] = rf.get("ok", False)
         return s
 
+    def _open_recording(self):
+        os.makedirs(REC_DIR, exist_ok=True)
+        name = "rec_" + time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(REC_DIR, name)
+        w = cv2.VideoWriter(path + ".avi", cv2.VideoWriter_fourcc(*"MJPG"),
+                            self.REC_FPS, (CV_W, CV_H))
+        c = open(path + ".csv", "w")
+        c.write(CSV_HEADER)
+        with self._st_lock:
+            self._status["rec_file"] = name
+        return w, c
+
     def _run(self):
         with self.cam.cv_hold():
             self.cam.set_external_source(True)
-            tx = 0
+            writer = csvf = None
             try:
-                while self._armed:
+                while self._armed or self._recording:
                     t0 = time.time()
-                    tx = self._tick(tx)
+                    out, row = self._tick()
+                    if self._recording:
+                        if writer is None:
+                            writer, csvf = self._open_recording()
+                        writer.write(out)
+                        csvf.write(row)
+                    elif writer is not None:
+                        writer.release(); csvf.close(); writer = csvf = None
                     time.sleep(max(0.0, 1.0 / self.RATE_HZ - (time.time() - t0)))
             finally:
+                if writer is not None:
+                    writer.release()
+                if csvf is not None:
+                    csvf.close()
                 self.cam.set_external_source(False)
 
-    def _tick(self, tx):
+    def _tick(self):
         yuv = self.cam.capture_lores()
         gray = yuv[:CV_H, :CV_W]
         bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV420p2BGR)
@@ -194,30 +244,41 @@ class PrecLandController:
         aruco = self.det.detect_aruco(gray)
         phase, target = self._decide(agl, aruco, bgr)
 
+        ax = ay = ox = oy = None
         sent = False
-        if target is not None and phase != PHASE_RTK and self._armed:
+        if target is not None:
             ax, ay = target.angles()
-            bx, by = image_to_body(ax, ay)
-            self.tel.send_landing_target(bx, by, agl if agl else 0.0)
-            sent = True
-            tx += 1
+            ox, oy = target.offset_norm()
+            if phase != PHASE_RTK and self._armed:
+                bx, by = image_to_body(ax, ay)
+                self.tel.send_landing_target(bx, by, agl if agl else 0.0)
+                sent = True
+                self._tx += 1
 
         out = self.det.annotate(bgr, target, phase=phase, agl=agl)
         ok, jpg = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         if ok:
             self.cam.push_frame(jpg.tobytes())
 
-        off = None
-        if target is not None:
-            ox, oy = target.offset_norm()
-            off = [round(ox, 3), round(oy, 3)]
         with self._st_lock:
             self._status.update(
                 phase=phase, source=(target.source if target else None),
                 agl=(round(agl, 2) if agl is not None else None),
-                offset=off, tx=tx, sent=sent,
+                offset=([round(ox, 3), round(oy, 3)] if target else None),
+                tx=self._tx, sent=sent,
             )
-        return tx
+
+        t = self.tel.snapshot()
+        row = ",".join([
+            "%.3f" % time.time(), str(t.get("mode", "")), "1" if self._armed else "0",
+            _f(t.get("roll")), _f(t.get("pitch")), _f(t.get("yaw")), _f(t.get("heading")),
+            _f(t.get("alt")), _f(agl), _f(t.get("voltage")), _f(t.get("battery_remaining")),
+            _f(t.get("fix_type")), _f(t.get("satellites")), phase or "",
+            (target.source if target else ""), _f(ox), _f(oy),
+            _f(math.degrees(ax) if ax is not None else None),
+            _f(math.degrees(ay) if ay is not None else None), "1" if sent else "0",
+        ]) + "\n"
+        return out, row
 
     def _decide(self, agl, aruco, bgr):
         # detektionsbaserad fas om ingen AGL (t.ex. bänktest utan TF-Luna)

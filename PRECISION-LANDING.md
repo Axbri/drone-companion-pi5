@@ -88,6 +88,21 @@ Läggs i param-backupen (`cube-full-params-*.param`) efter att de satts.
    släpper Pi:n och RTK håller in touchdown.
 4. **Avaktivera** när som helst; pilotens läges-byte/RC vinner alltid. **Pi:n armar/flyger aldrig.**
 
+## Inspelning (för fältanalys i efterhand)
+
+Tryck **● Spela in** i precland-panelen. Fungerar **med eller utan** precland armerat → du kan spela
+in hela flygningen. Sparar synkat i `/home/axel/recordings/`:
+
+- **Video** `.avi` (MJPEG, 640×480, **med CV-overlay** — markör/cirkel, fas, AGL, offset).
+- **Data** `.csv` — **en rad per videoruta** (ruta N ↔ rad N): `t` (epok-tid, exakt), mode, armed,
+  roll, pitch, yaw, heading, alt, **agl** (TF-Luna), batteri (V/%), GPS-fix/sats, fas, mål-källa,
+  offset ox/oy, `angle ax/ay` (grader), `sent` (skickades LANDING_TARGET). CSV:ns `t` är den exakta
+  tidsstämpeln per ruta; video-fps är nominell (~8 Hz på Pi 3A+).
+
+Ladda ner via **Inspelningar**-panelen (video- + data-länkar) eller `http://dronepi:8080/recordings/<namn>.avi`.
+Radera via ✕ i listan. **Analystips:** plotta CSV (agl vs t = nedstigningsprofil, ox/oy vs t =
+inriktnings-konvergens, fas-övergångar, `sent`) och titta på videon för visuell kontext.
+
 ## Att verifiera / tuna
 
 - **Kamera→kropp-mappning** i `image_to_body()` (precland.py): flytta målet mot nosen →

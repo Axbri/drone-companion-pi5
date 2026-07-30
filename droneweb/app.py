@@ -9,7 +9,8 @@ import subprocess
 import time
 
 import psutil
-from flask import Flask, Response, jsonify, render_template, request
+from flask import (Flask, Response, jsonify, render_template, request,
+                   send_from_directory)
 
 from camera import Camera
 from mavlink import MavlinkTelemetry
@@ -19,6 +20,7 @@ app = Flask(__name__)
 cam = Camera()
 tel = MavlinkTelemetry()
 rf = RangeFinder(tel)   # alltid på: reläar TF-Luna DISTANCE_SENSOR till FC från boot (lätt, ingen cv2)
+RECORDINGS_DIR = "/home/axel/recordings"
 
 # precland (cv2) skapas lazy vid första arm → cv2 importeras först då (sparar RAM i Steg 1)
 _precland = None
@@ -110,6 +112,45 @@ def api_precland():
         return jsonify({"armed": False, "phase": None,
                         "rangefinder_ok": st["ok"], "agl": st["agl"]})
     return jsonify(_precland.get_status())
+
+
+@app.route("/api/record", methods=["POST"])
+def api_record():
+    want = request.get_json(force=True, silent=True) or {}
+    pc = _get_precland()
+    pc.start_recording() if want.get("recording") else pc.stop_recording()
+    return jsonify(pc.get_status())
+
+
+@app.route("/api/recordings")
+def api_recordings():
+    recs = []
+    if os.path.isdir(RECORDINGS_DIR):
+        for f in sorted(os.listdir(RECORDINGS_DIR), reverse=True):
+            if not f.endswith(".avi"):
+                continue
+            base = f[:-4]
+            p = os.path.join(RECORDINGS_DIR, f)
+            has_csv = os.path.exists(os.path.join(RECORDINGS_DIR, base + ".csv"))
+            recs.append({"name": base, "size_mb": round(os.path.getsize(p) / 1e6, 1),
+                         "csv": has_csv})
+    return jsonify(recs)
+
+
+@app.route("/recordings/<path:fname>")
+def download_recording(fname):
+    return send_from_directory(RECORDINGS_DIR, fname, as_attachment=True)
+
+
+@app.route("/api/recordings/delete", methods=["POST"])
+def delete_recording():
+    name = os.path.basename((request.get_json(force=True, silent=True) or {}).get("name", ""))
+    if name:
+        for ext in (".avi", ".csv"):
+            p = os.path.join(RECORDINGS_DIR, name + ext)
+            if os.path.exists(p):
+                os.remove(p)
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
