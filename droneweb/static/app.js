@@ -134,8 +134,52 @@ async function pollPrecland() {
     $("pl-tx").textContent = p.sent ? `skickar (${p.tx})` : (p.tx ? `paus (${p.tx})` : "–");
     $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "ingen";
     updateRecBtn(p.recording);
+    seedExposure(p.exposure);
   } catch (e) {}
 }
+
+// ---- exponering (fältjustering) ----------------------------------------
+const expAuto = $("exp-auto"), expUs = $("exp-us"), expGain = $("exp-gain");
+const expCard = $("exposure-card");
+let expSeeded = false, expTimer = null;
+
+function reflectExposureUI() {
+  $("exp-us-val").textContent = expUs.value;
+  $("exp-gain-val").textContent = Number(expGain.value).toFixed(1);
+  expCard.classList.toggle("auto", expAuto.checked);
+}
+
+function sendExposure() {
+  fetch("/api/exposure", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      auto: expAuto.checked,
+      exposure_us: Number(expUs.value),
+      gain: Number(expGain.value),
+    }),
+  }).catch(() => {});
+}
+
+function onExposureInput() {
+  reflectExposureUI();
+  clearTimeout(expTimer);
+  expTimer = setTimeout(sendExposure, 120);   // debounce live-släpning
+}
+
+// seedar reglagen från serverns värden första gången (t.ex. tidigare inställt)
+function seedExposure(exp) {
+  if (!exp || expSeeded) return;
+  expSeeded = true;
+  expAuto.checked = !!exp.auto;
+  expUs.value = exp.exposure_us;
+  expGain.value = exp.gain;
+  reflectExposureUI();
+}
+
+expAuto.addEventListener("change", () => { reflectExposureUI(); sendExposure(); });
+expUs.addEventListener("input", onExposureInput);
+expGain.addEventListener("input", onExposureInput);
+reflectExposureUI();
 
 // ---- inspelning --------------------------------------------------------
 const recBtn = $("pl-rec");

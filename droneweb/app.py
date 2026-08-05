@@ -114,6 +114,17 @@ def api_precland():
     return jsonify(_precland.get_status())
 
 
+@app.route("/api/exposure", methods=["POST"])
+def api_exposure():
+    want = request.get_json(force=True, silent=True) or {}
+    pc = _get_precland()
+    return jsonify(pc.set_exposure(
+        auto=want.get("auto"),
+        exposure_us=want.get("exposure_us"),
+        gain=want.get("gain"),
+    ))
+
+
 @app.route("/api/record", methods=["POST"])
 def api_record():
     want = request.get_json(force=True, silent=True) or {}

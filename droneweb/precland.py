@@ -172,6 +172,10 @@ class PrecLandController:
         self._recording = False
         self._thread = None
         self._tx = 0
+        # CV-exponering (justeras live från webben för fältjustering)
+        self._auto_exposure = False
+        self._exposure_us = CV_EXPOSURE_US
+        self._gain = CV_GAIN
         self._st_lock = threading.Lock()
         self._status = {"phase": None, "source": None, "agl": None,
                         "offset": None, "tx": 0, "sent": False, "rec_file": None}
@@ -192,6 +196,30 @@ class PrecLandController:
     def disarm(self):
         self._armed = False
 
+    def _apply_exposure(self):
+        """Skjut aktuellt exponerings-läge till kameran. No-op om kameran ej är
+        igång (camera.set_cv_exposure gardar) → gäller då vid nästa Aktivera."""
+        if self._auto_exposure:
+            self.cam.set_cv_exposure(False)
+        else:
+            self.cam.set_cv_exposure(True, self._exposure_us, self._gain)
+
+    def exposure_status(self):
+        return {"auto": self._auto_exposure, "exposure_us": self._exposure_us,
+                "gain": round(self._gain, 1)}
+
+    def set_exposure(self, auto=None, exposure_us=None, gain=None):
+        """Ställ CV-exponering live från webben (fältjustering). Klämmer värden och
+        applicerar direkt om CV-loopen kör; annars gäller de vid nästa Aktivera."""
+        if auto is not None:
+            self._auto_exposure = bool(auto)
+        if exposure_us is not None:
+            self._exposure_us = int(max(100, min(20000, exposure_us)))
+        if gain is not None:
+            self._gain = float(max(1.0, min(16.0, gain)))
+        self._apply_exposure()
+        return self.exposure_status()
+
     def start_recording(self):
         self._recording = True
         self._ensure_thread()
@@ -204,6 +232,7 @@ class PrecLandController:
             s = dict(self._status)
         s["armed"] = self._armed
         s["recording"] = self._recording
+        s["exposure"] = self.exposure_status()
         rf = self.rf.status() if self.rf else {"ok": False}
         s["rangefinder_ok"] = rf.get("ok", False)
         return s
@@ -223,7 +252,7 @@ class PrecLandController:
     def _run(self):
         with self.cam.cv_hold():
             self.cam.set_external_source(True)
-            self.cam.set_cv_exposure(True, CV_EXPOSURE_US, CV_GAIN)
+            self._apply_exposure()
             writer = csvf = None
             try:
                 while self._armed or self._recording:

@@ -161,6 +161,15 @@ main {
 }
 @keyframes blink { 50% { opacity: 0.55; } }
 
+.row.chk { align-items: center; cursor: pointer; user-select: none; }
+.row.chk input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.slider-row { margin: 10px 0 2px; }
+.slider-lbl { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-bottom: 3px; }
+.slider-lbl b { color: var(--text); font-weight: 600; }
+input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+#exposure-card.auto .slider-row { opacity: 0.4; pointer-events: none; }
+.hint-sm { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.4; }
+
 .rec-list { font-size: 13px; }
 .rec-empty { color: var(--muted); }
 .rec-item {
