@@ -150,6 +150,23 @@ class Camera:
                 )
                 self._encoding = True
 
+    def set_cv_exposure(self, on, exposure_us=2000, gain=2.0):
+        """Steg 2: fast exponering under CV-loopen (fryser rörelse → skarp jämn
+        detektering, mot motion blur på höjd — Fynd 1). Kort slutartid gör rutan
+        skarp trots kameravibration. off = åter till auto-exponering (AeEnable=True)
+        för normal FPV-video. Kräver att kameran är startad (aktiv hold)."""
+        with self._lock:
+            if not self._started:
+                return
+            if on:
+                self._picam2.set_controls({
+                    "AeEnable": False,
+                    "ExposureTime": int(exposure_us),
+                    "AnalogueGain": float(gain),
+                })
+            else:
+                self._picam2.set_controls({"AeEnable": True})
+
     @property
     def viewers(self):
         return self._viewers

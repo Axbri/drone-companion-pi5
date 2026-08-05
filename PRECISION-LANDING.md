@@ -153,9 +153,12 @@ tidsbas kan förvirra precland-Kalmans latenskompensering. 0 = använd mottagnin
 **Öppna punkter (prova nästa flygning, i ordning):**
 1. **Testa med time_usec-fixen** (klar) — se om överslängen minskar.
 2. **`PLND_EST_TYPE` 0 (raw) vs 1 (Kalman)** — om Kalman översvänger p.g.a. latens kan raw vara lugnare.
-3. **Fast exponering under CV** (EJ implementerat) — picamera2 `AeEnable=False` + kort `ExposureTime`
-   (~1500–2500 µs) + gain, **bara** när CV-loopen kör (auto annars för FPV). Fryser rörelsen →
-   skarp jämn detektering → mjukare data. Störst effekt mot Fynd 1.
+3. **Fast exponering under CV** (KLAR, ej flygtestad) — `camera.set_cv_exposure()`: picamera2
+   `AeEnable=False` + kort `ExposureTime` + gain, sätts när CV-loopen startar och återställs till
+   auto när precland avaktiveras. Tunas via `CV_EXPOSURE_US`/`CV_GAIN` i `precland.py` (default
+   2000 µs / gain 2,0; tuna 1500–2500 µs efter ljus). Fryser rörelsen → skarp jämn detektering →
+   mjukare data. Störst effekt mot Fynd 1. **Verifiera på bänk** att overlay-videon inte blir för
+   mörk/ljus vid rådande ljus innan flygtest.
 4. **Höj takten / kapa latensen** (EJ implementerat) — koppla loss JPEG-encoden (~halva loop-tiden)
    från detekt+skicka → ~12–15 Hz. Tightar reglerloopen (mot Fynd 2).
 5. **Minska vibration mekaniskt** — balansera propellrar (störst), kolla motorer/prop-skick,

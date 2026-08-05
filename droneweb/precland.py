@@ -40,6 +40,14 @@ CX, CY = CV_W / 2.0, CV_H / 2.0
 
 PHASE_COLOR, PHASE_ARUCO, PHASE_RTK = "COLOR", "ARUCO", "RTK-HOLD"
 
+# Fast exponering under CV-loopen (mot motion blur på höjd — Fynd 1). Kort slutartid
+# fryser rörelsen så rutan blir skarp trots kameravibration; auto-exponering (default)
+# väljer ibland lång slutartid i starkt ljus och smetar ut markören. Tuna 1500-2500 µs
+# efter ljuset; höj gain om för mörkt (men mycket gain = brus som stör detekteringen).
+# Återgår till auto när precland avaktiveras (för normal FPV-video).
+CV_EXPOSURE_US = 2000
+CV_GAIN = 2.0
+
 
 class Target:
     __slots__ = ("u", "v", "source", "aruco_id", "radius", "corners")
@@ -215,6 +223,7 @@ class PrecLandController:
     def _run(self):
         with self.cam.cv_hold():
             self.cam.set_external_source(True)
+            self.cam.set_cv_exposure(True, CV_EXPOSURE_US, CV_GAIN)
             writer = csvf = None
             try:
                 while self._armed or self._recording:
@@ -233,6 +242,7 @@ class PrecLandController:
                     writer.release()
                 if csvf is not None:
                     csvf.close()
+                self.cam.set_cv_exposure(False)
                 self.cam.set_external_source(False)
 
     def _tick(self):
