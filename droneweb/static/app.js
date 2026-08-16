@@ -281,6 +281,7 @@ function fmtBps(b) {
 
 function fmtAge(s) {
   if (s == null) return "–";
+  if (s < 10) return s.toFixed(1) + "s sedan";
   s = Math.round(s);
   return s < 90 ? s + "s sedan" : Math.floor(s / 60) + "m sedan";
 }
@@ -298,7 +299,7 @@ async function pollRtk() {
     const age = $("rtk-age");
     age.textContent = fmtAge(r.rtcm_age);
     age.style.color = r.rtcm_age == null ? "var(--bad)"
-      : r.rtcm_age < 15 ? "var(--good)" : (r.rtcm_age < 60 ? "var(--warn)" : "var(--bad)");
+      : r.rtcm_age < 5 ? "var(--good)" : (r.rtcm_age < 20 ? "var(--warn)" : "var(--bad)");
     $("rtk-inj").textContent = r.injector ? "aktiv" : "inaktiv";
     const fix = $("rtk-fix");
     fix.textContent = FIX[r.fix_type] || "–";
@@ -343,4 +344,4 @@ pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);
 pollRecordings(); setInterval(pollRecordings, 4000);
 pollNetwork(); setInterval(pollNetwork, 3000);
-pollRtk(); setInterval(pollRtk, 3000);
+pollRtk(); setInterval(pollRtk, 1000);   // 1 Hz → sub-sekund-åldern känns live
