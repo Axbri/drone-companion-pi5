@@ -159,14 +159,41 @@ tidsbas kan förvirra precland-Kalmans latenskompensering. 0 = använd mottagnin
    2000 µs / gain 2,0; tuna 1500–2500 µs efter ljus). Fryser rörelsen → skarp jämn detektering →
    mjukare data. Störst effekt mot Fynd 1. **Verifiera på bänk** att overlay-videon inte blir för
    mörk/ljus vid rådande ljus innan flygtest.
-4. **Höj takten / kapa latensen** (EJ implementerat) — koppla loss JPEG-encoden (~halva loop-tiden)
-   från detekt+skicka → ~12–15 Hz. Tightar reglerloopen (mot Fynd 2).
+4. **Höj takten / kapa latensen** (KLAR — se Flygtest #2 nedan) — JPEG-encode + inspelning körs nu
+   i en writer-tråd, kontroll-loopen skickar LANDING_TARGET vid ~8–12 Hz.
 5. **Minska vibration mekaniskt** — balansera propellrar (störst), kolla motorer/prop-skick,
    mjukmontera FC. Kolla ArduPilots **VIBE**-logg (VibeX/Y/Z <30, clipping=0).
 6. Kamera-kalibrering (schackbräde) — valfritt, FOV är rätt; bara distorsion kvar.
 
 **Analysmetod:** spela in nästa försök → plotta CSV: `ox/oy` vs `t` (oscillationens amplitud +
 frekvens → latensbidrag), `agl` vs `t`, fas-övergångar, `sent`. Skala/period bekräftar om fixarna hjälpte.
+
+## Flygtest #2 — grundorsak: ÖVERSLÄNG, inte detektering (2026-08-16)
+
+4 inspelningar analyserade. Fast exponering ~fördubblade COLOR-detekteringen (22 %→30–46 %), men
+**det verkliga felet är översläng.** RTL-autolandning (`rec_20260816_074011`): precland korrigerar,
+**översvänger direkt förbi mitten så markören åker ut ur den fasta kamerans smala synfält** → tappas →
+ArduPilot klättrar och gör om (`PLND_RET_MAX`=4) 3–4 ggr → landar flera meter bredvid. Data bekräftar:
+översvänger även från centrerat läge (centrerad vid 9 s → bildkant vid 13 s); markören ligger alltid vid
+|offset| 0,8–0,98 precis före tappet; tydlig klättra/gör-om-sågtand vid ~27/42/57/71 s. Den låga
+"COLOR-%" var alltså mest markör-utanför-bild, inte oskärpa. **Orsak = latensdriven översläng** (loopen
+gick bara ~5 Hz + pipeline-lag) med fast kamera som inte kan hämta hem översvängen när målet lämnat bild.
+
+**Åtgärd A — ArduPilot-params (sätts i MP; testa på bevakad LAND från ~3 m RAKT över plattan, INTE RTL):**
+```
+PLND_EST_TYPE = 1      # Kalman (krävs för lag-kompensering)
+PLND_LAG      = 0.25   # kompensera vår sensor-latens (max; börja högt)
+WPNAV_SPEED   = 200    # cm/s — mjukare horisontell omställning (från 1000)
+LAND_SPEED    = 30     # cm/s — långsammare nedstigning = mer tid att stabilisera (från 50)
+```
+Behåll `PLND_STRICT`/`PLND_RET_MAX` tills vidare; om den fortfarande gör om är överslängen ej tämjd.
+
+**Åtgärd B — kod (KLAR, commit `d2fe524`):** kontroll-loopen gör nu bara detektera + skicka
+LANDING_TARGET (`RATE_HZ`=15, verkligt ~8–12 Hz), medan JPEG-encode + AVI/CSV-inspelning körs i en
+separat **writer-tråd** via en bounded drop-oldest-kö (`_Q_MAX`=8, RAM-säkert på Pi 3A+). BGR-konvertering
+hoppas över i ARUCO/RTK-fas när ingen tittar/spelar in. **OBS inspelnings-semantik ändrad:** CSV/video
+samplas nu i writer-takt (kan tappa rutor vid last), INTE en rad per skick; sann skick-räkning i status
+`tx`. Rollback: `precland.py.prethread.bak` på Pi:n.
 
 ## Uppskjutet
 
