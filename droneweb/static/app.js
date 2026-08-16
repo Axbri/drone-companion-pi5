@@ -279,6 +279,12 @@ function fmtBps(b) {
   return b >= 1000 ? (b / 1000).toFixed(1) + " kB/s" : b + " B/s";
 }
 
+function fmtAge(s) {
+  if (s == null) return "–";
+  s = Math.round(s);
+  return s < 90 ? s + "s sedan" : Math.floor(s / 60) + "m sedan";
+}
+
 async function pollRtk() {
   try {
     const r = await (await fetch("/api/rtk", { cache: "no-store" })).json();
@@ -289,6 +295,10 @@ async function pollRtk() {
     $("rtk-bps").textContent = r.base_ok
       ? (r.base_bps > 0 ? fmtBps(r.base_bps) : "inget flöde")
       : (r.err || "–");
+    const age = $("rtk-age");
+    age.textContent = fmtAge(r.rtcm_age);
+    age.style.color = r.rtcm_age == null ? "var(--bad)"
+      : r.rtcm_age < 15 ? "var(--good)" : (r.rtcm_age < 60 ? "var(--warn)" : "var(--bad)");
     $("rtk-inj").textContent = r.injector ? "aktiv" : "inaktiv";
     const fix = $("rtk-fix");
     fix.textContent = FIX[r.fix_type] || "–";

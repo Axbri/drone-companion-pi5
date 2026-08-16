@@ -17,7 +17,7 @@ import time
 CASTER, PORT, MOUNT = "homebase", 2101, "LOCAL"   # matchar mavproxy-ntrip.service
 USER, PASSWD = "anon", "anon"
 INJECTOR_UNIT = "mavproxy-ntrip.service"
-PERIOD = 30.0        # s mellan koll
+PERIOD = 10.0        # s mellan koll (kort → responsiv korrektionsålder; ~1 kB/koll)
 READ_S = 1.2         # s att mäta RTCM-flöde
 
 
@@ -25,16 +25,21 @@ class RtkMonitor:
     def __init__(self):
         self._lock = threading.Lock()
         self._st = {"base_ok": False, "base_bps": 0, "injector": False,
-                    "mount": MOUNT, "caster": CASTER, "checked": None, "err": None}
+                    "mount": MOUNT, "caster": CASTER, "checked": None,
+                    "last_rtcm": None, "err": None}
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
         while True:
             ok, bps, err = self._probe()
             inj = self._injector_active()
+            now = time.time()
+            upd = {"base_ok": ok, "base_bps": bps, "injector": inj,
+                   "checked": round(now, 1), "err": err}
+            if ok and bps > 0:                 # korrektioner strömmade → uppdatera åldern
+                upd["last_rtcm"] = now
             with self._lock:
-                self._st.update(base_ok=ok, base_bps=bps, injector=inj,
-                                checked=round(time.time(), 1), err=err)
+                self._st.update(upd)
             time.sleep(PERIOD)
 
     def _injector_active(self):
@@ -81,4 +86,6 @@ class RtkMonitor:
 
     def status(self):
         with self._lock:
-            return dict(self._st)
+            s = dict(self._st)
+        s["rtcm_age"] = round(time.time() - s["last_rtcm"], 1) if s["last_rtcm"] else None
+        return s
