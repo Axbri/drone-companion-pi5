@@ -59,7 +59,7 @@ header {
 main {
   height: calc(100% - 52px);
   display: grid;
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: 1fr 1fr;   /* två lika halvor: video vänster, kort höger */
 }
 
 .video-wrap {
@@ -90,15 +90,16 @@ main {
   border-left: 1px solid var(--line);
   padding: 12px;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  column-width: 230px;    /* flera kolumner: fyll höger halva, undvik scroll */
+  column-gap: 12px;
 }
 .card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 12px 14px;
+  break-inside: avoid;    /* kort delas aldrig mellan kolumner */
+  margin-bottom: 12px;    /* ersätter panelens gap i kolumn-layout */
 }
 .card h2 {
   font-size: 12px;
@@ -160,6 +161,8 @@ main {
   animation: blink 1s step-start infinite;
 }
 @keyframes blink { 50% { opacity: 0.55; } }
+#net-force4g { margin-top: 4px; }
+#net-force4g.armed { background: var(--warn); color: #1a1200; border-color: var(--warn); }
 
 .row.chk { align-items: center; cursor: pointer; user-select: none; }
 .row.chk input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
@@ -183,6 +186,5 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
 @media (max-width: 720px) {
   main { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
-  .panel { flex-direction: row; flex-wrap: wrap; border-left: 0; border-top: 1px solid var(--line); }
-  .card { flex: 1 1 45%; }
+  .panel { column-width: 150px; border-left: 0; border-top: 1px solid var(--line); }
 }

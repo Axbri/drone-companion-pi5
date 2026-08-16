@@ -1,6 +1,9 @@
-# Låter droneweb-webbappen (körs som axel) stänga av Pi:n via avstängningsknappen.
-# Enda tillåtna kommandot — inget annat root-privilegium ges.
+# Låter droneweb-webbappen (körs som axel) styra ett fåtal system-kommandon.
+# Endast dessa exakta kommandon tillåts — inget annat root-privilegium ges.
 # Installera:
 #   sudo install -m 440 -o root -g root droneweb.sudoers /etc/sudoers.d/droneweb
 #   sudo visudo -c        # verifiera syntax
 axel ALL=(root) NOPASSWD: /sbin/shutdown
+# Nätverks-testknapp: tvinga 4G genom att slå av/på WiFi-radion.
+axel ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi on
+axel ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi off

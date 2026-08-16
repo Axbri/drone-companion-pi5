@@ -239,9 +239,44 @@ plBtn.addEventListener("click", async () => {
   } catch (e) { alert("Fel: " + e); }
 });
 
+// ---- nätverk (hemma-WiFi vs 4G-dongle) ---------------------------------
+let netWifiEnabled = true;
+
+async function pollNetwork() {
+  try {
+    const n = await (await fetch("/api/network", { cache: "no-store" })).json();
+    netWifiEnabled = n.wifi_enabled;
+    const a = $("net-active");
+    a.textContent = n.active === "4g" ? "4G-dongle"
+      : n.active === "wifi" ? "WiFi (hemma)" : "ingen";
+    a.className = "pill " + (n.active === "none" ? "pill-bad" : "pill-good");
+    $("net-wifi").textContent = n.wifi_enabled ? (n.wifi_ssid || "på (ej ansluten)") : "AV";
+    $("net-wwan").textContent = n.wwan_ip || "nere";
+    const btn = $("net-force4g");
+    btn.textContent = n.wifi_enabled ? "Tvinga 4G (stäng av WiFi)" : "Slå på WiFi igen";
+    btn.classList.toggle("armed", !n.wifi_enabled);
+    $("net-revert").textContent = n.revert_in != null
+      ? `WiFi slås på automatiskt om ~${Math.ceil(n.revert_in / 60)} min` : "";
+  } catch (e) {}
+}
+
+$("net-force4g").addEventListener("click", async () => {
+  const turnOff = netWifiEnabled;   // WiFi på nu → knappen stänger av (tvingar 4G)
+  if (turnOff && !confirm(
+      "Stänga av WiFi och tvinga 4G?\n\nNår du sidan via hemma-WiFi tappar du den — öppna den då via Tailscale (dronepi:8080). WiFi slås på igen automatiskt efter ~10 min.")) return;
+  try {
+    await fetch("/api/wifi", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !turnOff }),
+    });
+    setTimeout(pollNetwork, 800);
+  } catch (e) { alert("Fel: " + e); }
+});
+
 // ---- loop --------------------------------------------------------------
 drawADI(0, 0);
 pollTelemetry(); setInterval(pollTelemetry, 200);
 pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);
 pollRecordings(); setInterval(pollRecordings, 4000);
+pollNetwork(); setInterval(pollNetwork, 3000);
