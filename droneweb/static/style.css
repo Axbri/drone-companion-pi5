@@ -59,8 +59,18 @@ header {
 main {
   height: calc(100% - 52px);
   display: grid;
-  grid-template-columns: 1fr 1fr;   /* två lika halvor: video vänster, kort höger */
+  /* video | dragbar avdelare | kort — --left styr videobredden (dras av användaren) */
+  grid-template-columns: var(--left, 1fr) 6px 1fr;
 }
+
+.splitter {
+  background: var(--line);
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+.splitter:hover, main.dragging .splitter { background: var(--accent); }
+main.dragging { cursor: col-resize; user-select: none; }
+main.dragging .video-wrap, main.dragging .panel { pointer-events: none; }
 
 .video-wrap {
   position: relative;
@@ -186,5 +196,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
 @media (max-width: 720px) {
   main { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
+  .splitter { display: none; }
   .panel { column-width: 150px; border-left: 0; border-top: 1px solid var(--line); }
 }

@@ -273,6 +273,36 @@ $("net-force4g").addEventListener("click", async () => {
   } catch (e) { alert("Fel: " + e); }
 });
 
+// ---- dragbar avdelare mellan video och panel ---------------------------
+(function () {
+  const splitter = $("splitter"), main = document.querySelector("main");
+  if (!splitter || !main) return;
+  let dragging = false, leftPx = parseInt(localStorage.getItem("splitLeft"), 10) || 0;
+
+  function apply(px) {
+    px = Math.max(240, Math.min(main.clientWidth - 240, px));   // min video / min panel
+    leftPx = px;
+    main.style.setProperty("--left", px + "px");
+    localStorage.setItem("splitLeft", px);
+  }
+  function down(e) { dragging = true; main.classList.add("dragging"); if (e.cancelable) e.preventDefault(); }
+  function move(e) {
+    if (!dragging) return;
+    apply((e.touches ? e.touches[0].clientX : e.clientX) - main.getBoundingClientRect().left);
+    if (e.cancelable) e.preventDefault();
+  }
+  function up() { dragging = false; main.classList.remove("dragging"); }
+
+  splitter.addEventListener("mousedown", down);
+  splitter.addEventListener("touchstart", down, { passive: false });
+  window.addEventListener("mousemove", move);
+  window.addEventListener("touchmove", move, { passive: false });
+  window.addEventListener("mouseup", up);
+  window.addEventListener("touchend", up);
+  window.addEventListener("resize", () => { if (leftPx) apply(leftPx); });   // håll inom skärmen
+  if (leftPx) apply(leftPx);                                                 // återställ sparad position
+})();
+
 // ---- loop --------------------------------------------------------------
 drawADI(0, 0);
 pollTelemetry(); setInterval(pollTelemetry, 200);
