@@ -12,6 +12,7 @@ Modulen är fristående testbar:  python precland.py <bild> [målstorlek_px]
 """
 import math
 import os
+import queue
 import threading
 import time
 
@@ -159,11 +160,14 @@ class PrecLandController:
     efter AGL, detekterar, skickar LANDING_TARGET (bara armerat, utom RTK-fasen),
     matar annoterad video, och spelar in synkad video (.avi) + datalogg (.csv)."""
 
-    RATE_HZ = 12
-    REC_FPS = 8           # faktisk loop-takt vid inspelning på Pi 3A+ (video-fps-metadata).
-                          # OBS: CSV:ns t-kolumn är exakt tid per ruta (ruta N = CSV-rad N).
+    RATE_HZ = 15          # kontroll-loopens tak (= kamera-FPS). Tung JPEG-encode + inspelning
+                          # körs i separat writer-tråd, så detekt+skick av LANDING_TARGET tightas
+                          # (mot översläng/latens — Fynd 2). Verklig takt ~8-12 Hz på Pi 3A+.
+    REC_FPS = 8           # AVI-fps-metadata (nominell). Verklig inspelningstakt är writer-begränsad;
+                          # CSV:ns t-kolumn är den exakta tiden per ruta (ruta N = CSV-rad N).
     ARUCO_MAX_AGL = 3.5   # m — under detta föredras ArUco framför färg
     RTK_AGL = 0.5         # m — under detta: sluta skicka, RTK håller x/y
+    _Q_MAX = 8            # writer-köns tak → drop-oldest (håller RAM nere på Pi 3A+)
 
     def __init__(self, cam, tel, rangefinder=None):
         self.cam, self.tel, self.rf = cam, tel, rangefinder
@@ -172,6 +176,7 @@ class PrecLandController:
         self._recording = False
         self._thread = None
         self._tx = 0
+        self._q = None       # writer-kö (skapas i _run)
         # CV-exponering (justeras live från webben för fältjustering)
         self._auto_exposure = False
         self._exposure_us = CV_EXPOSURE_US
@@ -250,38 +255,47 @@ class PrecLandController:
         return w, c
 
     def _run(self):
+        """Kontroll-loop: bara detektera + skicka LANDING_TARGET (låg latens).
+        Den tunga vyn (annotera + JPEG + inspelning + CSV) lämnas av till en
+        writer-tråd via en bounded kö, så skick-takten inte bromsas av encoden."""
         with self.cam.cv_hold():
             self.cam.set_external_source(True)
             self._apply_exposure()
-            writer = csvf = None
+            self._q = queue.Queue(maxsize=self._Q_MAX)
+            wt = threading.Thread(target=self._writer_loop, daemon=True)
+            wt.start()
             try:
                 while self._armed or self._recording:
                     t0 = time.time()
-                    out, row = self._tick()
-                    if self._recording:
-                        if writer is None:
-                            writer, csvf = self._open_recording()
-                        writer.write(out)
-                        csvf.write(row)
-                    elif writer is not None:
-                        writer.release(); csvf.close(); writer = csvf = None
+                    self._control_tick()
                     time.sleep(max(0.0, 1.0 / self.RATE_HZ - (time.time() - t0)))
             finally:
-                if writer is not None:
-                    writer.release()
-                if csvf is not None:
-                    csvf.close()
+                self._q.put(None)        # signalera writer att flusha + avsluta
+                wt.join(timeout=3)
+                self._q = None
                 self.cam.set_cv_exposure(False)
                 self.cam.set_external_source(False)
 
-    def _tick(self):
+    def _control_tick(self):
+        """Latens-kritisk: detektera målet och skicka LANDING_TARGET direkt."""
         yuv = self.cam.capture_lores()
         gray = yuv[:CV_H, :CV_W]
-        bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV420p2BGR)
         agl = self.rf.agl() if self.rf else None
-
         aruco = self.det.detect_aruco(gray)
-        phase, target = self._decide(agl, aruco, bgr)
+        phase = self._decide_phase(agl, aruco)
+
+        # BGR behövs bara för färgdetektering (COLOR-fas) och för annoterad video.
+        need_video = self._recording or self.cam.viewers > 0
+        bgr = None
+        if phase == PHASE_COLOR or need_video:
+            bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV420p2BGR)
+
+        if phase == PHASE_ARUCO:
+            target = aruco
+        elif phase == PHASE_COLOR:
+            target = self.det.detect_color(bgr)
+        else:
+            target = None
 
         ax = ay = ox = oy = None
         sent = False
@@ -294,11 +308,6 @@ class PrecLandController:
                 sent = True
                 self._tx += 1
 
-        out = self.det.annotate(bgr, target, phase=phase, agl=agl)
-        ok, jpg = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-        if ok:
-            self.cam.push_frame(jpg.tobytes())
-
         with self._st_lock:
             self._status.update(
                 phase=phase, source=(target.source if target else None),
@@ -307,30 +316,78 @@ class PrecLandController:
                 tx=self._tx, sent=sent,
             )
 
-        t = self.tel.snapshot()
-        row = ",".join([
-            "%.3f" % time.time(), str(t.get("mode", "")), "1" if self._armed else "0",
-            _f(t.get("roll")), _f(t.get("pitch")), _f(t.get("yaw")), _f(t.get("heading")),
-            _f(t.get("alt")), _f(agl), _f(t.get("voltage")), _f(t.get("battery_remaining")),
-            _f(t.get("fix_type")), _f(t.get("satellites")), phase or "",
+        # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg)
+        if need_video and bgr is not None:
+            self._enqueue((bgr, target, phase, agl, sent, self._armed,
+                           self._recording, ox, oy, ax, ay, time.time(),
+                           self.tel.snapshot()))
+
+    def _decide_phase(self, agl, aruco):
+        if agl is None:                       # ingen AGL (t.ex. bänk utan TF-Luna) → detektionsbaserat
+            return PHASE_ARUCO if aruco is not None else PHASE_COLOR
+        if agl < self.RTK_AGL:
+            return PHASE_RTK
+        if aruco is not None and agl < self.ARUCO_MAX_AGL:
+            return PHASE_ARUCO
+        return PHASE_COLOR
+
+    def _enqueue(self, item):
+        try:
+            self._q.put_nowait(item)
+        except queue.Full:
+            try:
+                self._q.get_nowait()          # släpp äldsta → web hålls färsk, inspelning tappar en ruta
+            except queue.Empty:
+                pass
+            try:
+                self._q.put_nowait(item)
+            except queue.Full:
+                pass
+
+    def _writer_loop(self):
+        """Bakgrund: annotera, encoda JPEG (web), skriv inspelning + CSV."""
+        writer = csvf = None
+        try:
+            while True:
+                try:
+                    item = self._q.get(timeout=1.0)
+                except queue.Empty:
+                    if writer is not None and not self._recording:
+                        writer.release(); csvf.close(); writer = csvf = None
+                    continue
+                if item is None:
+                    break
+                (bgr, target, phase, agl, sent, armed, recording,
+                 ox, oy, ax, ay, t, tel) = item
+                out = self.det.annotate(bgr, target, phase=phase, agl=agl)
+                ok, jpg = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                if ok:
+                    self.cam.push_frame(jpg.tobytes())
+                if recording:
+                    if writer is None:
+                        writer, csvf = self._open_recording()
+                    writer.write(out)
+                    csvf.write(self._row(t, tel, armed, agl, phase, target,
+                                         ox, oy, ax, ay, sent))
+                elif writer is not None:
+                    writer.release(); csvf.close(); writer = csvf = None
+        finally:
+            if writer is not None:
+                writer.release()
+            if csvf is not None:
+                csvf.close()
+
+    @staticmethod
+    def _row(t, tel, armed, agl, phase, target, ox, oy, ax, ay, sent):
+        return ",".join([
+            "%.3f" % t, str(tel.get("mode", "")), "1" if armed else "0",
+            _f(tel.get("roll")), _f(tel.get("pitch")), _f(tel.get("yaw")), _f(tel.get("heading")),
+            _f(tel.get("alt")), _f(agl), _f(tel.get("voltage")), _f(tel.get("battery_remaining")),
+            _f(tel.get("fix_type")), _f(tel.get("satellites")), phase or "",
             (target.source if target else ""), _f(ox), _f(oy),
             _f(math.degrees(ax) if ax is not None else None),
             _f(math.degrees(ay) if ay is not None else None), "1" if sent else "0",
         ]) + "\n"
-        return out, row
-
-    def _decide(self, agl, aruco, bgr):
-        # detektionsbaserad fas om ingen AGL (t.ex. bänktest utan TF-Luna)
-        if agl is None:
-            if aruco is not None:
-                return PHASE_ARUCO, aruco
-            return PHASE_COLOR, self.det.detect_color(bgr)
-        # höjdstyrd fas
-        if agl < self.RTK_AGL:
-            return PHASE_RTK, None
-        if aruco is not None and agl < self.ARUCO_MAX_AGL:
-            return PHASE_ARUCO, aruco
-        return PHASE_COLOR, self.det.detect_color(bgr)
 
 
 # ---- fristående test ---------------------------------------------------
