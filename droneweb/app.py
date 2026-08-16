@@ -17,11 +17,13 @@ from flask import (Flask, Response, jsonify, render_template, request,
 from camera import Camera
 from mavlink import MavlinkTelemetry
 from rangefinder import RangeFinder
+from rtk import RtkMonitor
 
 app = Flask(__name__)
 cam = Camera()
 tel = MavlinkTelemetry()
 rf = RangeFinder(tel)   # alltid på: reläar TF-Luna DISTANCE_SENSOR till FC från boot (lätt, ingen cv2)
+rtkmon = RtkMonitor()   # pollar NTRIP-basen + injektorn i bakgrunden
 RECORDINGS_DIR = "/home/axel/recordings"
 
 # precland (cv2) skapas lazy vid första arm → cv2 importeras först då (sparar RAM i Steg 1)
@@ -59,6 +61,15 @@ def _mjpeg():
 @app.route("/api/telemetry")
 def api_telemetry():
     return jsonify(tel.snapshot())
+
+
+@app.route("/api/rtk")
+def api_rtk():
+    st = rtkmon.status()
+    t = tel.snapshot()
+    st["fix_type"] = t.get("fix_type")
+    st["satellites"] = t.get("satellites")
+    return jsonify(st)
 
 
 @app.route("/api/stats")

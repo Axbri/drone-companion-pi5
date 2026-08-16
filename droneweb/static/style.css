@@ -43,6 +43,7 @@ header {
 }
 .pill-good { color: var(--good); border-color: var(--good); }
 .pill-bad { color: var(--bad); border-color: var(--bad); }
+.pill-warn { color: var(--warn); border-color: var(--warn); }
 .pill-armed { color: var(--bad); border-color: var(--bad); font-weight: 700; }
 
 .btn-danger {

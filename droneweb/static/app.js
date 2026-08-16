@@ -273,6 +273,29 @@ $("net-force4g").addEventListener("click", async () => {
   } catch (e) { alert("Fel: " + e); }
 });
 
+// ---- RTK-korrektioner --------------------------------------------------
+function fmtBps(b) {
+  if (b == null) return "–";
+  return b >= 1000 ? (b / 1000).toFixed(1) + " kB/s" : b + " B/s";
+}
+
+async function pollRtk() {
+  try {
+    const r = await (await fetch("/api/rtk", { cache: "no-store" })).json();
+    const flowing = r.base_ok && r.base_bps > 0;
+    const base = $("rtk-base");
+    base.textContent = r.base_ok ? "ansluten" : "nere";
+    base.className = "pill " + (flowing ? "pill-good" : (r.base_ok ? "pill-warn" : "pill-bad"));
+    $("rtk-bps").textContent = r.base_ok
+      ? (r.base_bps > 0 ? fmtBps(r.base_bps) : "inget flöde")
+      : (r.err || "–");
+    $("rtk-inj").textContent = r.injector ? "aktiv" : "inaktiv";
+    const fix = $("rtk-fix");
+    fix.textContent = FIX[r.fix_type] || "–";
+    fix.style.color = r.fix_type >= 5 ? "var(--good)" : (r.fix_type === 4 ? "var(--warn)" : "");
+  } catch (e) {}
+}
+
 // ---- dragbar avdelare mellan video och panel ---------------------------
 (function () {
   const splitter = $("splitter"), main = document.querySelector("main");
@@ -310,3 +333,4 @@ pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);
 pollRecordings(); setInterval(pollRecordings, 4000);
 pollNetwork(); setInterval(pollNetwork, 3000);
+pollRtk(); setInterval(pollRtk, 3000);
