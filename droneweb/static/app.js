@@ -135,7 +135,24 @@ async function pollPrecland() {
     $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "ingen";
     updateRecBtn(p.recording);
     seedExposure(p.exposure);
+    renderCalib(p.calib);
   } catch (e) {}
+}
+
+function renderCalib(c) {
+  $("cal-px").textContent = c && c.px != null ? c.px : "–";
+  $("cal-f").textContent = c && c.f_meas != null ? c.f_meas : "–";
+  $("cal-goff").textContent = c && c.goff_cm != null ? c.goff_cm : "–";
+  const el = $("cal-scale");
+  if (c && c.f_meas != null && c.assumed_f) {
+    const sc = c.f_meas / c.assumed_f;
+    el.textContent = sc.toFixed(2) + "×";
+    const d = Math.abs(sc - 1);
+    el.style.color = d < 0.1 ? "var(--good)" : (d < 0.25 ? "var(--warn)" : "var(--bad)");
+  } else {
+    el.textContent = "–";
+    el.style.color = "";
+  }
 }
 
 // ---- exponering (fältjustering) ----------------------------------------

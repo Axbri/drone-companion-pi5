@@ -102,6 +102,18 @@
           Justera live medan precland är aktiv — kort slutartid mot suddighet, höj gain om för mörkt.</div>
       </div>
 
+      <div class="card" id="calib-card">
+        <h2>Kamerakalibrering</h2>
+        <div class="row"><span>Markör</span><b><span id="cal-px">–</span> px</b></div>
+        <div class="row"><span>Uppmätt brännvidd</span><b><span id="cal-f">–</span> px</b></div>
+        <div class="row"><span>Skalfel</span><b><span id="cal-scale">–</span></b></div>
+        <div class="row"><span>Markavstånd (impl)</span><b><span id="cal-goff">–</span> cm</b></div>
+        <div class="hint-sm">Kör igång CV-loopen (● Spela in räcker), rikta kameran rakt ned mot den
+          plana centrerade ArUco-markören. <b>Uppmätt brännvidd</b> ska ~matcha antaget (~530). Skalfel ≠ 1,0
+          → vinklarna till ArduPilot är felskalade med den faktorn. <b>Markavstånd</b> ska matcha uppmätt
+          sidoförskjutning med måttband. Kräver rätt <code>MARKER_M</code> (markörens verkliga sidlängd).</div>
+      </div>
+
       <div class="card">
         <h2>Inspelningar</h2>
         <div id="rec-list" class="rec-list">–</div>

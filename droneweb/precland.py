@@ -39,6 +39,11 @@ FX = (CV_W / 2) / math.tan(math.radians(HFOV_DEG) / 2)
 FY = (CV_H / 2) / math.tan(math.radians(VFOV_DEG) / 2)
 CX, CY = CV_W / 2.0, CV_H / 2.0
 
+# Kamerakalibrering: ArUco-markörens verkliga sidlängd (svarta fyrkanten), meter.
+# MÄT den utskrivna markören och sätt rätt värde — hela kalibreringen beror på detta.
+MARKER_M = 0.30
+ASSUMED_F = FX               # antagen brännvidd (px) att jämföra uppmätt mot
+
 PHASE_COLOR, PHASE_ARUCO, PHASE_RTK = "COLOR", "ARUCO", "RTK-HOLD"
 
 # Fast exponering under CV-loopen (mot motion blur på höjd — Fynd 1). Kort slutartid
@@ -67,6 +72,14 @@ class Target:
     def offset_norm(self):
         """Normaliserad offset [-1,1] från bildcentrum (för UI)."""
         return (self.u - CX) / (CV_W / 2), (self.v - CY) / (CV_H / 2)
+
+    def px_size(self):
+        """Genomsnittlig sidlängd (px) för ArUco-fyrkanten, ur de fyra hörnen.
+        För kamerakalibrering: f = px_size * avstånd / markör_verklig_storlek."""
+        if self.corners is None:
+            return None
+        p = self.corners
+        return sum(math.hypot(*(p[(i + 1) % 4] - p[i])) for i in range(4)) / 4.0
 
 
 class PrecLandDetector:
@@ -183,7 +196,8 @@ class PrecLandController:
         self._gain = CV_GAIN
         self._st_lock = threading.Lock()
         self._status = {"phase": None, "source": None, "agl": None,
-                        "offset": None, "tx": 0, "sent": False, "rec_file": None}
+                        "offset": None, "tx": 0, "sent": False, "rec_file": None,
+                        "calib": None}
 
     @property
     def armed(self):
@@ -308,12 +322,25 @@ class PrecLandController:
                 sent = True
                 self._tx += 1
 
+        # kamerakalibrering: implied markavstånd (cm) = agl*tan(vinkel), och uppmätt
+        # brännvidd ur ArUco-markörens px-storlek + känd fysisk storlek + agl.
+        calib = None
+        if target is not None and agl:
+            gx, gy = agl * math.tan(ax), agl * math.tan(ay)
+            calib = {"goff_cm": round(100 * math.hypot(gx, gy)), "px": None,
+                     "f_meas": None, "assumed_f": round(ASSUMED_F)}
+            if target.source == "aruco":
+                px = target.px_size()
+                if px:
+                    calib["px"] = round(px, 1)
+                    calib["f_meas"] = round(px * agl / MARKER_M)
+
         with self._st_lock:
             self._status.update(
                 phase=phase, source=(target.source if target else None),
                 agl=(round(agl, 2) if agl is not None else None),
                 offset=([round(ox, 3), round(oy, 3)] if target else None),
-                tx=self._tx, sent=sent,
+                tx=self._tx, sent=sent, calib=calib,
             )
 
         # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg)
