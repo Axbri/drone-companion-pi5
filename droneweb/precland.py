@@ -203,10 +203,13 @@ class PrecLandController:
         self._exposure_us = CV_EXPOSURE_US
         self._gain = CV_GAIN
         self._cmd_scale = CMD_SCALE_DEFAULT   # styrskala för LANDING_TARGET (live)
+        self._lat_ms = None                   # Pi-latens (kamera-fångst → skick), EWMA
+        self._loop_hz = None                  # verklig loop-takt, EWMA
+        self._last_tick = None
         self._st_lock = threading.Lock()
         self._status = {"phase": None, "source": None, "agl": None,
                         "offset": None, "tx": 0, "sent": False, "rec_file": None,
-                        "calib": None}
+                        "calib": None, "latency_ms": None, "loop_hz": None}
 
     @property
     def armed(self):
@@ -290,6 +293,7 @@ class PrecLandController:
         with self.cam.cv_hold():
             self.cam.set_external_source(True)
             self._apply_exposure()
+            self._last_tick = None
             self._q = queue.Queue(maxsize=self._Q_MAX)
             wt = threading.Thread(target=self._writer_loop, daemon=True)
             wt.start()
@@ -307,7 +311,7 @@ class PrecLandController:
 
     def _control_tick(self):
         """Latens-kritisk: detektera målet och skicka LANDING_TARGET direkt."""
-        yuv = self.cam.capture_lores()
+        yuv, sensor_ts = self.cam.capture_lores_ts()
         gray = yuv[:CV_H, :CV_W]
         agl = self.rf.agl() if self.rf else None
         aruco = self.det.detect_aruco(gray)
@@ -351,12 +355,27 @@ class PrecLandController:
                     calib["px"] = round(px, 1)
                     calib["f_meas"] = round(px * agl / MARKER_M)
 
+        # Pi-latens (kamera-fångst → nu, strax efter skick) + verklig loop-takt, EWMA
+        now = time.time()
+        if self._last_tick is not None:
+            dt = now - self._last_tick
+            if dt > 0:
+                hz = 1.0 / dt
+                self._loop_hz = hz if self._loop_hz is None else 0.8 * self._loop_hz + 0.2 * hz
+        self._last_tick = now
+        if sensor_ts:
+            lat = (time.clock_gettime(time.CLOCK_BOOTTIME) * 1e9 - sensor_ts) / 1e6
+            if 0 <= lat < 2000:
+                self._lat_ms = lat if self._lat_ms is None else 0.8 * self._lat_ms + 0.2 * lat
+
         with self._st_lock:
             self._status.update(
                 phase=phase, source=(target.source if target else None),
                 agl=(round(agl, 2) if agl is not None else None),
                 offset=([round(ox, 3), round(oy, 3)] if target else None),
                 tx=self._tx, sent=sent, calib=calib,
+                latency_ms=(round(self._lat_ms, 1) if self._lat_ms else None),
+                loop_hz=(round(self._loop_hz, 1) if self._loop_hz else None),
             )
 
         # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg)

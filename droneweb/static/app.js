@@ -133,6 +133,9 @@ async function pollPrecland() {
     $("pl-offset").textContent = p.offset ? `${p.offset[0]}, ${p.offset[1]}` : "–";
     $("pl-tx").textContent = p.sent ? `skickar (${p.tx})` : (p.tx ? `paus (${p.tx})` : "–");
     $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "ingen";
+    const running = p.armed || p.recording;
+    $("pl-lat").textContent = running && p.latency_ms != null ? p.latency_ms : "–";
+    $("pl-hz").textContent = running && p.loop_hz != null ? p.loop_hz : "–";
     updateRecBtn(p.recording);
     seedExposure(p.exposure);
     renderCalib(p.calib);

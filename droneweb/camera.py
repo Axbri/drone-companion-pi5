@@ -18,7 +18,8 @@ from picamera2.outputs import FileOutput
 
 MAIN_SIZE = (1024, 768)   # 4:3, full FOV (IMX219 är 4:3)
 LORES_SIZE = (640, 480)   # gråskala-Y för CV
-FPS = 40                  # höjd 15→40: capture ~53ms→~11ms → lägre latens/snabbare precland-loop
+FPS = 25                  # matchar CV-loopens takt (~26 Hz) → färska rutor, min latens (~67ms).
+                          # Högre (40) bygger backlog → HÖGRE latens; lägre (<20) tappar takt.
                           # (påverkar även FPV-videon → mer 4G-data när man tittar; ofarligt)
 
 
@@ -45,6 +46,8 @@ class Camera:
             main={"size": MAIN_SIZE, "format": "YUV420"},
             lores={"size": LORES_SIZE, "format": "YUV420"},
             controls={"FrameRate": FPS},
+            buffer_count=2,   # låg buffert → capture_request ger färsk ruta (min latens),
+                              # inte en kö av gamla. Vi kopierar+släpper direkt så 2 räcker.
         )
         self._picam2.configure(cfg)
         self._output = StreamingOutput()
@@ -130,6 +133,20 @@ class Camera:
         """Rå lores YUV420-array (för CV: Y-plan = gråskala, cvtColor→BGR för färg).
         Kräver aktiv hold."""
         return self._picam2.capture_array("lores")
+
+    def capture_lores_ts(self):
+        """(lores YUV420-array, SensorTimestamp i ns) för latensmätning — via
+        capture_request så vi får kamerans fångst-tidsstämpel. Fallback: (arr, None)."""
+        try:
+            req = self._picam2.capture_request()
+        except Exception:
+            return self.capture_lores(), None
+        try:
+            arr = req.make_array("lores")
+            ts = req.get_metadata().get("SensorTimestamp")
+        finally:
+            req.release()
+        return arr, ts
 
     def push_frame(self, jpeg_bytes):
         """Skriv en färdig JPEG till videoströmmen (precland-annoterad bild)."""
