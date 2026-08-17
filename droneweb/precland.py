@@ -55,6 +55,12 @@ PHASE_COLOR, PHASE_ARUCO, PHASE_RTK = "COLOR", "ARUCO", "RTK-HOLD"
 CV_EXPOSURE_US = 2000
 CV_GAIN = 2.0
 
+# Styrskala: skalar vinkelfelet som skickas till ArduPilot innan LANDING_TARGET.
+# 1.0 = fullt fel (som kameran ser det). <1.0 = mildare korrektioner (mot översläng vid
+# latens) — drönaren konvergerar ändå geometriskt om landningshastigheten är låg.
+# Justeras live i webben. Detta är i praktiken det precland-gain ArduPilot saknar.
+CMD_SCALE_DEFAULT = 1.0
+
 
 class Target:
     __slots__ = ("u", "v", "source", "aruco_id", "radius", "corners")
@@ -160,7 +166,7 @@ def image_to_body(ax_img, ay_img):
 
 REC_DIR = "/home/axel/recordings"
 CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
-              "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent\n")
+              "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent,scale\n")
 
 
 def _f(v, nd=3):
@@ -195,6 +201,7 @@ class PrecLandController:
         self._auto_exposure = False
         self._exposure_us = CV_EXPOSURE_US
         self._gain = CV_GAIN
+        self._cmd_scale = CMD_SCALE_DEFAULT   # styrskala för LANDING_TARGET (live)
         self._st_lock = threading.Lock()
         self._status = {"phase": None, "source": None, "agl": None,
                         "offset": None, "tx": 0, "sent": False, "rec_file": None,
@@ -228,6 +235,11 @@ class PrecLandController:
         return {"auto": self._auto_exposure, "exposure_us": self._exposure_us,
                 "gain": round(self._gain, 1)}
 
+    def set_cmd_scale(self, s):
+        """Styrskala [0.2, 1.0] för LANDING_TARGET-vinklarna. Live."""
+        self._cmd_scale = float(max(0.2, min(1.0, s)))
+        return round(self._cmd_scale, 2)
+
     def set_exposure(self, auto=None, exposure_us=None, gain=None):
         """Ställ CV-exponering live från webben (fältjustering). Klämmer värden och
         applicerar direkt om CV-loopen kör; annars gäller de vid nästa Aktivera."""
@@ -253,6 +265,7 @@ class PrecLandController:
         s["armed"] = self._armed
         s["recording"] = self._recording
         s["exposure"] = self.exposure_status()
+        s["cmd_scale"] = round(self._cmd_scale, 2)
         rf = self.rf.status() if self.rf else {"ok": False}
         s["rangefinder_ok"] = rf.get("ok", False)
         return s
@@ -319,7 +332,8 @@ class PrecLandController:
             ox, oy = target.offset_norm()
             if phase != PHASE_RTK and self._armed:
                 bx, by = image_to_body(ax, ay)
-                self.tel.send_landing_target(bx, by, agl if agl else 0.0)
+                k = self._cmd_scale                      # styrskala: mildare korrektion
+                self.tel.send_landing_target(bx * k, by * k, agl if agl else 0.0)
                 sent = True
                 self._tx += 1
 
@@ -405,8 +419,7 @@ class PrecLandController:
             if csvf is not None:
                 csvf.close()
 
-    @staticmethod
-    def _row(t, tel, armed, agl, phase, target, ox, oy, ax, ay, sent):
+    def _row(self, t, tel, armed, agl, phase, target, ox, oy, ax, ay, sent):
         return ",".join([
             "%.3f" % t, str(tel.get("mode", "")), "1" if armed else "0",
             _f(tel.get("roll")), _f(tel.get("pitch")), _f(tel.get("yaw")), _f(tel.get("heading")),
@@ -415,6 +428,7 @@ class PrecLandController:
             (target.source if target else ""), _f(ox), _f(oy),
             _f(math.degrees(ax) if ax is not None else None),
             _f(math.degrees(ay) if ay is not None else None), "1" if sent else "0",
+            "%.2f" % self._cmd_scale,
         ]) + "\n"
 
 

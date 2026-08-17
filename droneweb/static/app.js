@@ -136,8 +136,36 @@ async function pollPrecland() {
     updateRecBtn(p.recording);
     seedExposure(p.exposure);
     renderCalib(p.calib);
+    seedScale(p.cmd_scale);
   } catch (e) {}
 }
+
+// ---- styrskala (kommando-skalning till ArduPilot) ----------------------
+const scaleEl = $("pl-scale");
+let scaleSeeded = false, scaleTimer = null;
+
+function reflectScale() {
+  $("pl-scale-val").textContent = Number(scaleEl.value).toFixed(2);
+}
+
+function seedScale(v) {
+  if (v == null || scaleSeeded) return;
+  scaleSeeded = true;
+  scaleEl.value = v;
+  reflectScale();
+}
+
+scaleEl.addEventListener("input", () => {
+  reflectScale();
+  clearTimeout(scaleTimer);
+  scaleTimer = setTimeout(() => {
+    fetch("/api/landscale", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scale: Number(scaleEl.value) }),
+    }).catch(() => {});
+  }, 120);
+});
+reflectScale();
 
 function renderCalib(c) {
   $("cal-px").textContent = c && c.px != null ? c.px : "–";
