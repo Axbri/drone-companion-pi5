@@ -236,8 +236,8 @@ class PrecLandController:
                 "gain": round(self._gain, 1)}
 
     def set_cmd_scale(self, s):
-        """Styrskala [0.2, 1.0] för LANDING_TARGET-vinklarna. Live."""
-        self._cmd_scale = float(max(0.2, min(1.0, s)))
+        """Styrskala [0.1, 1.0] för LANDING_TARGET-vinklarna. Live."""
+        self._cmd_scale = float(max(0.1, min(1.0, s)))
         return round(self._cmd_scale, 2)
 
     def set_exposure(self, auto=None, exposure_us=None, gain=None):
