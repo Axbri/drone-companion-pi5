@@ -41,8 +41,8 @@ CX, CY = CV_W / 2.0, CV_H / 2.0
 
 # Kamerakalibrering: ArUco-markörens verkliga sidlängd (svarta fyrkanten), meter.
 # MÄT den utskrivna markören och sätt rätt värde — hela kalibreringen beror på detta.
-# 0.145 = Axels test-markör (bänk). Landnings-markören är ~0.30 → byt tillbaka vid behov.
-MARKER_M = 0.145
+# 0.30 = landnings-markörens ArUco (flyg). Bänk-test-markören var 0.145.
+MARKER_M = 0.30
 ASSUMED_F = FX               # antagen brännvidd (px) att jämföra uppmätt mot
 
 PHASE_COLOR, PHASE_ARUCO, PHASE_RTK = "COLOR", "ARUCO", "RTK-HOLD"
