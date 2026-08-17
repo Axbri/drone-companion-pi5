@@ -18,7 +18,8 @@ from picamera2.outputs import FileOutput
 
 MAIN_SIZE = (1024, 768)   # 4:3, full FOV (IMX219 är 4:3)
 LORES_SIZE = (640, 480)   # gråskala-Y för CV
-FPS = 15
+FPS = 40                  # höjd 15→40: capture ~53ms→~11ms → lägre latens/snabbare precland-loop
+                          # (påverkar även FPV-videon → mer 4G-data när man tittar; ofarligt)
 
 
 class StreamingOutput(io.BufferedIOBase):

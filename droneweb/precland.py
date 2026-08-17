@@ -180,9 +180,10 @@ class PrecLandController:
     efter AGL, detekterar, skickar LANDING_TARGET (bara armerat, utom RTK-fasen),
     matar annoterad video, och spelar in synkad video (.avi) + datalogg (.csv)."""
 
-    RATE_HZ = 15          # kontroll-loopens tak (= kamera-FPS). Tung JPEG-encode + inspelning
+    RATE_HZ = 40          # kontroll-loopens tak (matchar kamera-FPS). Tung JPEG-encode + inspelning
                           # körs i separat writer-tråd, så detekt+skick av LANDING_TARGET tightas
-                          # (mot översläng/latens — Fynd 2). Verklig takt ~8-12 Hz på Pi 3A+.
+                          # (mot översläng/latens — Fynd 2). CV-bundet tak ~35 Hz på Pi 3A+ isolerat;
+                          # verklig takt lägre med kontention men klart över de gamla ~10-14 Hz.
     REC_FPS = 8           # AVI-fps-metadata (nominell). Verklig inspelningstakt är writer-begränsad;
                           # CSV:ns t-kolumn är den exakta tiden per ruta (ruta N = CSV-rad N).
     ARUCO_MAX_AGL = 3.5   # m — under detta föredras ArUco framför färg
