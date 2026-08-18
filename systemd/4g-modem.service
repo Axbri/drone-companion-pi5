@@ -1,0 +1,14 @@
+[Unit]
+Description=SIM7600E-H 4G (QMI raw-ip) auto-connect
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/4g-modem.sh
+ExecStop=/usr/local/sbin/4g-modem.sh stop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
