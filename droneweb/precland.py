@@ -137,6 +137,16 @@ class PrecLandDetector:
                 cv2.circle(bgr, (u, v), int(target.radius), col, 2)
             if target.source == "aruco" and target.corners is not None:
                 cv2.polylines(bgr, [target.corners.astype(np.int32)], True, col, 2)
+                # Riktningspil: markörens "upp" (mitt på topp-kanten minus mitt på
+                # botten-kanten, corners[0..3] = medsols f.o.m. markörens tryckta
+                # topp-vänster-hörn, så vektorn följer markörens tryckta orientering
+                # när den roterar i bild). Bara en visuell indikator nu — underlag
+                # för framtida gir-inriktning av drönaren mot markören vid landning.
+                p = target.corners
+                up = ((p[0] + p[1]) - (p[2] + p[3])) / 2.0
+                tip = (u + up[0] * 0.7, v + up[1] * 0.7)
+                cv2.arrowedLine(bgr, (u, v), (int(round(tip[0])), int(round(tip[1]))),
+                                col, 2, tipLength=0.35)
             cv2.line(bgr, (int(CX), int(CY)), (u, v), col, 2)
             cv2.circle(bgr, (u, v), 4, col, -1)
             ax, ay = target.angles()
