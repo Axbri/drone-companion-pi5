@@ -147,11 +147,13 @@ function drawHud(canvasId, roll, pitch, heading) {
   // ---- pitch ladder, rotated with roll around the reticle ----
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate((roll * Math.PI) / 180);
-  const pxPerDeg = scale * 0.012, halfW = scale * 0.15;
-  for (let deg = -90; deg <= 90; deg += 10) {
+  ctx.rotate((-roll * Math.PI) / 180);
+  // Spacing/range tuned for a quadcopter's normal envelope (rarely > ~30deg
+  // roll/pitch) rather than a fixed-wing's full ±90deg ladder.
+  const pxPerDeg = scale * 0.024, halfW = scale * 0.15;
+  for (let deg = -40; deg <= 40; deg += 10) {
     const y = (pitch - deg) * pxPerDeg;
-    if (Math.abs(y) > scale * 0.42) continue;
+    if (Math.abs(y) > scale * 0.48) continue;
     const major = deg % 30 === 0;
     const hw = deg === 0 ? halfW * 1.7 : (major ? halfW : halfW * 0.5);
     ctx.beginPath();
@@ -162,7 +164,7 @@ function drawHud(canvasId, roll, pitch, heading) {
       ctx.moveTo(-hw, y); ctx.lineTo(hw, y);
     }
     ctx.stroke();
-    if (major && deg !== 0) {
+    if (deg !== 0) {
       ctx.fillText(String(Math.abs(deg)), -hw - scale * 0.035, y);
       ctx.fillText(String(Math.abs(deg)), hw + scale * 0.035, y);
     }
