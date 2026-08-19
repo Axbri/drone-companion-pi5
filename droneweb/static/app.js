@@ -3,9 +3,9 @@
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 0) => (v === undefined || v === null ? "–" : Number(v).toFixed(d));
 
-const FIX = { 0: "Ingen", 1: "Ingen fix", 2: "2D", 3: "3D", 4: "DGPS", 5: "RTK-Float", 6: "RTK-Fixed" };
+const FIX = { 0: "None", 1: "No fix", 2: "2D", 3: "3D", 4: "DGPS", 5: "RTK-Float", 6: "RTK-Fixed" };
 
-// ---- telemetri (~5 Hz) -------------------------------------------------
+// ---- telemetry (~5 Hz) -----------------------------------------------------
 async function pollTelemetry() {
   try {
     const t = await (await fetch("/api/telemetry", { cache: "no-store" })).json();
@@ -81,14 +81,14 @@ function drawADI(roll, pitch) {
   ctx.rotate((-roll * Math.PI) / 180);
   const horizon = (pitch / 45) * r;
   ctx.translate(0, horizon);
-  ctx.fillStyle = "#4a7fb5";                 // himmel
+  ctx.fillStyle = "#4a7fb5";                 // sky
   ctx.fillRect(-r, -r * 2, w, r * 2);
-  ctx.fillStyle = "#6b4a2f";                 // mark
+  ctx.fillStyle = "#6b4a2f";                 // ground
   ctx.fillRect(-r, 0, w, r * 2);
   ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
   ctx.restore();
-  // fast flygsymbol
+  // fixed aircraft symbol
   ctx.strokeStyle = "#ffcc00"; ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(r - 22, r); ctx.lineTo(r - 6, r);
@@ -97,26 +97,26 @@ function drawADI(roll, pitch) {
   ctx.stroke();
 }
 
-// ---- video-hint --------------------------------------------------------
+// ---- video hint ---------------------------------------------------------
 $("video").addEventListener("load", () => ($("video-hint").style.display = "none"));
 $("video").addEventListener("error", () => {
   $("video-hint").style.display = "block";
-  $("video-hint").textContent = "Ingen video – kontrollera droneweb/kameran";
+  $("video-hint").textContent = "No video – check droneweb/camera";
 });
 
-// ---- avstängning -------------------------------------------------------
+// ---- shutdown ------------------------------------------------------------
 $("shutdown").addEventListener("click", async () => {
-  if (!confirm("Stänga av Raspberry Pi:n?\n\nDrönaren tappar då RTK, telemetri och video tills den startas om manuellt.")) return;
+  if (!confirm("Shut down the Raspberry Pi?\n\nThe drone will then lose RTK, telemetry, and video until it is restarted manually.")) return;
   try {
     await fetch("/api/shutdown", { method: "POST" });
     document.body.innerHTML =
-      '<div style="display:grid;place-items:center;height:100vh;color:#8b98a8;font-family:system-ui">Pi:n stängs av…</div>';
+      '<div style="display:grid;place-items:center;height:100vh;color:#8b98a8;font-family:system-ui">Pi is shutting down…</div>';
   } catch (e) {
-    alert("Avstängning misslyckades: " + e);
+    alert("Shutdown failed: " + e);
   }
 });
 
-// ---- precisionslandning ------------------------------------------------
+// ---- precision landing ---------------------------------------------------
 let plArmed = false;
 const plBtn = $("pl-arm"), plCard = $("precland-card");
 
@@ -124,15 +124,15 @@ async function pollPrecland() {
   try {
     const p = await (await fetch("/api/precland", { cache: "no-store" })).json();
     plArmed = !!p.armed;
-    plBtn.textContent = plArmed ? "Avaktivera" : "Aktivera";
+    plBtn.textContent = plArmed ? "Disarm" : "Arm";
     plBtn.classList.toggle("armed", plArmed);
     plCard.classList.toggle("armed", plArmed);
-    $("pl-phase").textContent = p.phase || (plArmed ? "…" : "av");
+    $("pl-phase").textContent = p.phase || (plArmed ? "…" : "off");
     $("pl-source").textContent = p.source || "–";
     $("pl-agl").textContent = p.agl != null ? Number(p.agl).toFixed(2) : "–";
     $("pl-offset").textContent = p.offset ? `${p.offset[0]}, ${p.offset[1]}` : "–";
-    $("pl-tx").textContent = p.sent ? `skickar (${p.tx})` : (p.tx ? `paus (${p.tx})` : "–");
-    $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "ingen";
+    $("pl-tx").textContent = p.sent ? `sending (${p.tx})` : (p.tx ? `paused (${p.tx})` : "–");
+    $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "none";
     const running = p.armed || p.recording;
     $("pl-lat").textContent = running && p.latency_ms != null ? p.latency_ms : "–";
     $("pl-hz").textContent = running && p.loop_hz != null ? p.loop_hz : "–";
@@ -143,7 +143,7 @@ async function pollPrecland() {
   } catch (e) {}
 }
 
-// ---- styrskala (kommando-skalning till ArduPilot) ----------------------
+// ---- control scale (command scaling to ArduPilot) ------------------------
 const scaleEl = $("pl-scale");
 let scaleSeeded = false, scaleTimer = null;
 
@@ -186,7 +186,7 @@ function renderCalib(c) {
   }
 }
 
-// ---- exponering (fältjustering) ----------------------------------------
+// ---- exposure (field adjustment) ------------------------------------------
 const expAuto = $("exp-auto"), expUs = $("exp-us"), expGain = $("exp-gain");
 const expCard = $("exposure-card");
 let expSeeded = false, expTimer = null;
@@ -211,10 +211,10 @@ function sendExposure() {
 function onExposureInput() {
   reflectExposureUI();
   clearTimeout(expTimer);
-  expTimer = setTimeout(sendExposure, 120);   // debounce live-släpning
+  expTimer = setTimeout(sendExposure, 120);   // debounce live drag
 }
 
-// seedar reglagen från serverns värden första gången (t.ex. tidigare inställt)
+// seeds the controls from server values the first time (e.g. previously set)
 function seedExposure(exp) {
   if (!exp || expSeeded) return;
   expSeeded = true;
@@ -229,13 +229,13 @@ expUs.addEventListener("input", onExposureInput);
 expGain.addEventListener("input", onExposureInput);
 reflectExposureUI();
 
-// ---- inspelning --------------------------------------------------------
+// ---- recording -------------------------------------------------------
 const recBtn = $("pl-rec");
 let recording = false;
 
 function updateRecBtn(rec) {
   recording = !!rec;
-  recBtn.textContent = recording ? "■ Stoppa inspelning" : "● Spela in";
+  recBtn.textContent = recording ? "■ Stop recording" : "● Record";
   recBtn.classList.toggle("recording", recording);
 }
 
@@ -247,25 +247,25 @@ recBtn.addEventListener("click", async () => {
     });
     pollPrecland();
     setTimeout(pollRecordings, 500);
-  } catch (e) { alert("Fel: " + e); }
+  } catch (e) { alert("Error: " + e); }
 });
 
 async function pollRecordings() {
   try {
     const list = await (await fetch("/api/recordings", { cache: "no-store" })).json();
     const el = $("rec-list");
-    if (!list.length) { el.innerHTML = '<div class="rec-empty">Inga inspelningar än</div>'; return; }
+    if (!list.length) { el.innerHTML = '<div class="rec-empty">No recordings yet</div>'; return; }
     el.innerHTML = list.map((r) => `
       <div class="rec-item">
         <span class="rec-name" title="${r.name}">${r.name.replace("rec_", "")}</span>
         <span class="rec-sz">${r.size_mb} MB</span>
         <a href="/recordings/${r.name}.avi" download>video</a>
         ${r.csv ? `<a href="/recordings/${r.name}.csv" download>data</a>` : ""}
-        <button class="rec-del" data-name="${r.name}" title="Radera">✕</button>
+        <button class="rec-del" data-name="${r.name}" title="Delete">✕</button>
       </div>`).join("");
     el.querySelectorAll(".rec-del").forEach((b) =>
       b.addEventListener("click", async () => {
-        if (!confirm("Radera inspelning " + b.dataset.name + "?")) return;
+        if (!confirm("Delete recording " + b.dataset.name + "?")) return;
         await fetch("/api/recordings/delete", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: b.dataset.name }),
@@ -277,17 +277,17 @@ async function pollRecordings() {
 
 plBtn.addEventListener("click", async () => {
   const want = !plArmed;
-  if (want && !confirm("Aktivera precisionslandning?\n\nPi:n börjar skicka LANDING_TARGET till ArduPilot när ett mål syns. Använd bara vid landning över plattan.")) return;
+  if (want && !confirm("Arm precision landing?\n\nThe Pi will start sending LANDING_TARGET to ArduPilot once a target is visible. Only use when landing over the pad.")) return;
   try {
     await fetch("/api/precland", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ armed: want }),
     });
     pollPrecland();
-  } catch (e) { alert("Fel: " + e); }
+  } catch (e) { alert("Error: " + e); }
 });
 
-// ---- nätverk (hemma-WiFi vs 4G-dongle) ---------------------------------
+// ---- network (home WiFi vs 4G dongle) -------------------------------------
 let netWifiEnabled = true;
 
 async function pollNetwork() {
@@ -295,33 +295,33 @@ async function pollNetwork() {
     const n = await (await fetch("/api/network", { cache: "no-store" })).json();
     netWifiEnabled = n.wifi_enabled;
     const a = $("net-active");
-    a.textContent = n.active === "4g" ? "4G-dongle"
-      : n.active === "wifi" ? "WiFi (hemma)" : "ingen";
+    a.textContent = n.active === "4g" ? "4G dongle"
+      : n.active === "wifi" ? "WiFi (home)" : "none";
     a.className = "pill " + (n.active === "none" ? "pill-bad" : "pill-good");
-    $("net-wifi").textContent = n.wifi_enabled ? (n.wifi_ssid || "på (ej ansluten)") : "AV";
-    $("net-wwan").textContent = n.wwan_ip || "nere";
+    $("net-wifi").textContent = n.wifi_enabled ? (n.wifi_ssid || "on (not connected)") : "OFF";
+    $("net-wwan").textContent = n.wwan_ip || "down";
     const btn = $("net-force4g");
-    btn.textContent = n.wifi_enabled ? "Tvinga 4G (stäng av WiFi)" : "Slå på WiFi igen";
+    btn.textContent = n.wifi_enabled ? "Force 4G (turn off WiFi)" : "Turn WiFi back on";
     btn.classList.toggle("armed", !n.wifi_enabled);
     $("net-revert").textContent = n.revert_in != null
-      ? `WiFi slås på automatiskt om ~${Math.ceil(n.revert_in / 60)} min` : "";
+      ? `WiFi turns back on automatically in ~${Math.ceil(n.revert_in / 60)} min` : "";
   } catch (e) {}
 }
 
 $("net-force4g").addEventListener("click", async () => {
-  const turnOff = netWifiEnabled;   // WiFi på nu → knappen stänger av (tvingar 4G)
+  const turnOff = netWifiEnabled;   // WiFi on now → button turns it off (forces 4G)
   if (turnOff && !confirm(
-      "Stänga av WiFi och tvinga 4G?\n\nNår du sidan via hemma-WiFi tappar du den — öppna den då via Tailscale (dronepi:8080). WiFi slås på igen automatiskt efter ~10 min.")) return;
+      "Turn off WiFi and force 4G?\n\nIf you're on this page via home WiFi you'll lose it — reach it via Tailscale (dronepi:8080) instead. WiFi turns back on automatically after ~10 min.")) return;
   try {
     await fetch("/api/wifi", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: !turnOff }),
     });
     setTimeout(pollNetwork, 800);
-  } catch (e) { alert("Fel: " + e); }
+  } catch (e) { alert("Error: " + e); }
 });
 
-// ---- RTK-korrektioner --------------------------------------------------
+// ---- RTK corrections -------------------------------------------------------
 function fmtBps(b) {
   if (b == null) return "–";
   return b >= 1000 ? (b / 1000).toFixed(1) + " kB/s" : b + " B/s";
@@ -329,9 +329,9 @@ function fmtBps(b) {
 
 function fmtAge(s) {
   if (s == null) return "–";
-  if (s < 10) return s.toFixed(1) + "s sedan";
+  if (s < 10) return s.toFixed(1) + "s ago";
   s = Math.round(s);
-  return s < 90 ? s + "s sedan" : Math.floor(s / 60) + "m sedan";
+  return s < 90 ? s + "s ago" : Math.floor(s / 60) + "m ago";
 }
 
 async function pollRtk() {
@@ -339,23 +339,23 @@ async function pollRtk() {
     const r = await (await fetch("/api/rtk", { cache: "no-store" })).json();
     const flowing = r.base_ok && r.base_bps > 0;
     const base = $("rtk-base");
-    base.textContent = r.base_ok ? "ansluten" : "nere";
+    base.textContent = r.base_ok ? "connected" : "down";
     base.className = "pill " + (flowing ? "pill-good" : (r.base_ok ? "pill-warn" : "pill-bad"));
     $("rtk-bps").textContent = r.base_ok
-      ? (r.base_bps > 0 ? fmtBps(r.base_bps) : "inget flöde")
+      ? (r.base_bps > 0 ? fmtBps(r.base_bps) : "no flow")
       : (r.err || "–");
     const age = $("rtk-age");
     age.textContent = fmtAge(r.rtcm_age);
     age.style.color = r.rtcm_age == null ? "var(--bad)"
       : r.rtcm_age < 5 ? "var(--good)" : (r.rtcm_age < 20 ? "var(--warn)" : "var(--bad)");
-    $("rtk-inj").textContent = r.injector ? "aktiv" : "inaktiv";
+    $("rtk-inj").textContent = r.injector ? "active" : "inactive";
     const fix = $("rtk-fix");
     fix.textContent = FIX[r.fix_type] || "–";
     fix.style.color = r.fix_type >= 5 ? "var(--good)" : (r.fix_type === 4 ? "var(--warn)" : "");
   } catch (e) {}
 }
 
-// ---- dragbar avdelare mellan video och panel ---------------------------
+// ---- draggable splitter between video and panel ---------------------------
 (function () {
   const splitter = $("splitter"), main = document.querySelector("main");
   if (!splitter || !main) return;
@@ -381,15 +381,15 @@ async function pollRtk() {
   window.addEventListener("touchmove", move, { passive: false });
   window.addEventListener("mouseup", up);
   window.addEventListener("touchend", up);
-  window.addEventListener("resize", () => { if (leftPx) apply(leftPx); });   // håll inom skärmen
-  if (leftPx) apply(leftPx);                                                 // återställ sparad position
+  window.addEventListener("resize", () => { if (leftPx) apply(leftPx); });   // keep within screen
+  if (leftPx) apply(leftPx);                                                 // restore saved position
 })();
 
-// ---- loop --------------------------------------------------------------
+// ---- loop ------------------------------------------------------------------
 drawADI(0, 0);
 pollTelemetry(); setInterval(pollTelemetry, 200);
 pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);
 pollRecordings(); setInterval(pollRecordings, 4000);
 pollNetwork(); setInterval(pollNetwork, 3000);
-pollRtk(); setInterval(pollRtk, 1000);   // 1 Hz → sub-sekund-åldern känns live
+pollRtk(); setInterval(pollRtk, 1000);   // 1 Hz → sub-second age still feels live
