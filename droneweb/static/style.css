@@ -57,21 +57,50 @@ header {
 }
 .btn-danger:hover { filter: brightness(1.1); }
 
+.tabs {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.tab-btn {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 14px 7px;
+  cursor: pointer;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
 main {
-  height: calc(100% - 52px);
-  display: grid;
-  /* video | dragbar avdelare | kort — --left styr videobredden (dras av användaren) */
+  height: calc(100% - 52px - 44px);
+  position: relative;
+}
+
+.view {
+  display: none;
+  height: 100%;
+  /* video | dragbar splitter | cards — --left styr videobredden (dras av användaren) */
   grid-template-columns: var(--left, 1fr) 6px 1fr;
 }
+.view.active { display: grid; }
+.view.view-single.active { display: block; }
 
 .splitter {
   background: var(--line);
   cursor: col-resize;
   transition: background 0.15s;
 }
-.splitter:hover, main.dragging .splitter { background: var(--accent); }
-main.dragging { cursor: col-resize; user-select: none; }
-main.dragging .video-wrap, main.dragging .panel { pointer-events: none; }
+.splitter:hover, .view.dragging .splitter { background: var(--accent); }
+.view.dragging { cursor: col-resize; user-select: none; }
+.view.dragging .video-wrap, .view.dragging .panel { pointer-events: none; }
 
 .video-wrap {
   position: relative;
@@ -81,7 +110,7 @@ main.dragging .video-wrap, main.dragging .panel { pointer-events: none; }
   justify-content: center;
   overflow: hidden;
 }
-#video { width: 100%; height: 100%; object-fit: contain; }
+#video, #video-hq { width: 100%; height: 100%; object-fit: contain; }
 .adi {
   position: absolute;
   right: 14px;
@@ -95,6 +124,14 @@ main.dragging .video-wrap, main.dragging .panel { pointer-events: none; }
   color: var(--muted);
   font-size: 14px;
 }
+.hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 
 .panel {
   background: var(--panel);
@@ -104,6 +141,7 @@ main.dragging .video-wrap, main.dragging .panel { pointer-events: none; }
   column-width: 230px;    /* flera kolumner: fyll höger halva, undvik scroll */
   column-gap: 12px;
 }
+.view.view-single .panel { height: 100%; border-left: 0; }
 .card {
   background: var(--card);
   border: 1px solid var(--line);
@@ -181,7 +219,8 @@ main.dragging .video-wrap, main.dragging .panel { pointer-events: none; }
 .slider-lbl { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-bottom: 3px; }
 .slider-lbl b { color: var(--text); font-weight: 600; }
 input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
-#exposure-card.auto .slider-row { opacity: 0.4; pointer-events: none; }
+#exposure-card.auto .slider-row,
+#exposure-hq-card.auto .slider-row { opacity: 0.4; pointer-events: none; }
 .hint-sm { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.4; }
 
 .rec-list { font-size: 13px; }
@@ -196,7 +235,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 .rec-item .rec-del { color: var(--bad); cursor: pointer; background: none; border: 0; font-size: 14px; padding: 0; }
 
 @media (max-width: 720px) {
-  main { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
+  .view { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
   .splitter { display: none; }
   .panel { column-width: 150px; border-left: 0; border-top: 1px solid var(--line); }
 }

@@ -15,12 +15,14 @@ from flask import (Flask, Response, jsonify, render_template, request,
                    send_from_directory)
 
 from camera import Camera
+from camera_hq import HQCamera
 from mavlink import MavlinkTelemetry
 from rangefinder import RangeFinder
 from rtk import RtkMonitor
 
 app = Flask(__name__)
-cam = Camera()
+cam = Camera()        # imx219 — precland (low-latency CV loop)
+hq_cam = HQCamera()   # imx477 — Pilot view FPV stream only
 tel = MavlinkTelemetry()
 rf = RangeFinder(tel)   # alltid på: reläar TF-Luna DISTANCE_SENSOR till FC från boot (lätt, ingen cv2)
 rtkmon = RtkMonitor()   # pollar NTRIP-basen + injektorn i bakgrunden
@@ -49,12 +51,19 @@ def index():
 @app.route("/video.mjpg")
 def video():
     return Response(
-        _mjpeg(), mimetype="multipart/x-mixed-replace; boundary=FRAME"
+        _mjpeg(cam), mimetype="multipart/x-mixed-replace; boundary=FRAME"
     )
 
 
-def _mjpeg():
-    for frame in cam.frames():
+@app.route("/video_hq.mjpg")
+def video_hq():
+    return Response(
+        _mjpeg(hq_cam), mimetype="multipart/x-mixed-replace; boundary=FRAME"
+    )
+
+
+def _mjpeg(source):
+    for frame in source.frames():
         yield b"--FRAME\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
 
 
@@ -205,6 +214,18 @@ def api_exposure():
         exposure_us=want.get("exposure_us"),
         gain=want.get("gain"),
     ))
+
+
+@app.route("/api/exposure_hq", methods=["GET", "POST"])
+def api_exposure_hq():
+    if request.method == "POST":
+        want = request.get_json(force=True, silent=True) or {}
+        hq_cam.set_exposure(
+            auto=want.get("auto"),
+            exposure_us=want.get("exposure_us"),
+            gain=want.get("gain"),
+        )
+    return jsonify(hq_cam.exposure_status())
 
 
 @app.route("/api/landscale", methods=["POST"])

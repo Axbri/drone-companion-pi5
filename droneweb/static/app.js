@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 0) => (v === undefined || v === null ? "–" : Number(v).toFixed(d));
+const setText = (sel, text) => document.querySelectorAll(sel).forEach((el) => (el.textContent = text));
 
 const FIX = { 0: "None", 1: "No fix", 2: "2D", 3: "3D", 4: "DGPS", 5: "RTK-Float", 6: "RTK-Fixed" };
 
@@ -20,42 +21,42 @@ async function pollTelemetry() {
     armed.textContent = t.armed ? "ARMED" : "DISARMED";
     armed.className = "pill " + (t.armed ? "pill-armed" : "");
 
-    $("volt").textContent = fmt(t.voltage, 2);
-    $("curr").textContent = fmt(t.current, 1);
-    $("batt").textContent = fmt(t.battery_remaining);
-    setBar("batt-bar", t.battery_remaining, [20, 40], true);
+    // Battery + Attitude cards appear on both Pilot view and Precision landing tabs.
+    setText(".f-volt", fmt(t.voltage, 2));
+    setText(".f-curr", fmt(t.current, 1));
+    setText(".f-batt", fmt(t.battery_remaining));
+    setBar(".f-batt-bar", t.battery_remaining, [20, 40], true);
 
-    $("roll").textContent = fmt(t.roll, 1);
-    $("pitch").textContent = fmt(t.pitch, 1);
-    $("hdg").textContent = fmt(t.heading);
-    $("alt").textContent = fmt(t.alt, 1);
-    $("gps").textContent =
-      (FIX[t.fix_type] || "–") + (t.satellites != null ? ` · ${t.satellites} sat` : "");
+    setText(".f-roll", fmt(t.roll, 1));
+    setText(".f-pitch", fmt(t.pitch, 1));
+    setText(".f-hdg", fmt(t.heading));
+    setText(".f-alt", fmt(t.alt, 1));
+    setText(".f-gps", (FIX[t.fix_type] || "–") + (t.satellites != null ? ` · ${t.satellites} sat` : ""));
 
-    drawADI(t.roll || 0, t.pitch || 0);
+    if (hudOn) drawHud("hud-pilot", t.roll || 0, t.pitch || 0, t.heading || 0);
+    drawADI("adi-precland", t.roll || 0, t.pitch || 0);
   } catch (e) {
     $("link").className = "pill pill-bad";
     $("link").textContent = "offline";
   }
 }
 
-// ---- Pi-stats (~1 Hz) --------------------------------------------------
+// ---- Pi stats (~1 Hz) -------------------------------------------------------
 async function pollStats() {
   try {
     const s = await (await fetch("/api/stats", { cache: "no-store" })).json();
     $("cpu").textContent = fmt(s.cpu_percent);
-    setBar("cpu-bar", s.cpu_percent, [60, 85]);
+    setBar("#cpu-bar", s.cpu_percent, [60, 85]);
     $("mem").textContent = `${s.mem_used_mb} / ${s.mem_total_mb} MB`;
-    setBar("mem-bar", s.mem_percent, [75, 90]);
+    setBar("#mem-bar", s.mem_percent, [75, 90]);
     $("net").textContent = `${fmt(s.net_rx_kbps, 0)} / ${fmt(s.net_tx_kbps, 0)}`;
     $("temp").textContent = fmt(s.temp_c, 1);
   } catch (e) {}
 }
 
-function setBar(id, pct, [warn, bad], invert = false) {
-  const el = $(id);
+function setBar(sel, pct, [warn, bad], invert = false) {
   if (pct == null) return;
-  el.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  const width = Math.max(0, Math.min(100, pct)) + "%";
   let color = "var(--good)";
   if (invert) {
     if (pct <= warn) color = "var(--bad)";
@@ -64,12 +65,16 @@ function setBar(id, pct, [warn, bad], invert = false) {
     if (pct >= bad) color = "var(--bad)";
     else if (pct >= warn) color = "var(--warn)";
   }
-  el.style.background = color;
+  document.querySelectorAll(sel).forEach((el) => {
+    el.style.width = width;
+    el.style.background = color;
+  });
 }
 
-// ---- artificial horizon (roll/pitch) ----------------------------------
-function drawADI(roll, pitch) {
-  const c = $("adi");
+// ---- artificial horizon (roll/pitch) ---------------------------------------
+function drawADI(canvasId, roll, pitch) {
+  const c = $(canvasId);
+  if (!c) return;
   const ctx = c.getContext("2d");
   const w = c.width, h = c.height, r = w / 2;
   ctx.clearRect(0, 0, w, h);
@@ -97,11 +102,130 @@ function drawADI(roll, pitch) {
   ctx.stroke();
 }
 
-// ---- video hint ---------------------------------------------------------
+// ---- FPV HUD overlay (pitch ladder, bank indicator, heading tape) --------
+const hudCanvas = $("hud-pilot"), hudToggle = $("hud-toggle");
+let hudOn = localStorage.getItem("hudOn") !== "0";
+hudToggle.checked = hudOn;
+hudCanvas.style.display = hudOn ? "block" : "none";
+hudToggle.addEventListener("change", () => {
+  hudOn = hudToggle.checked;
+  localStorage.setItem("hudOn", hudOn ? "1" : "0");
+  hudCanvas.style.display = hudOn ? "block" : "none";
+});
+
+function drawHud(canvasId, roll, pitch, heading) {
+  const c = $(canvasId);
+  const rect = c.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;   // hidden tab or not laid out yet
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(rect.width * dpr), h = Math.round(rect.height * dpr);
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2, scale = Math.min(w, h);
+  ctx.strokeStyle = "#ffcc00"; ctx.fillStyle = "#ffcc00";
+  ctx.lineWidth = Math.max(1.5, scale * 0.0025);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0,0,0,0.7)"; ctx.shadowBlur = scale * 0.004;
+  ctx.font = `600 ${Math.round(scale * 0.026)}px system-ui, sans-serif`;
+
+  // ---- pitch ladder, rotated with roll around the reticle ----
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate((-roll * Math.PI) / 180);
+  const pxPerDeg = scale * 0.012, halfW = scale * 0.15;
+  for (let deg = -90; deg <= 90; deg += 10) {
+    const y = (deg - pitch) * pxPerDeg;
+    if (Math.abs(y) > scale * 0.42) continue;
+    const major = deg % 30 === 0;
+    const hw = deg === 0 ? halfW * 1.7 : (major ? halfW : halfW * 0.5);
+    ctx.beginPath();
+    if (deg === 0) {   // horizon line, broken in the middle for the reticle
+      ctx.moveTo(-hw, y); ctx.lineTo(-halfW * 0.35, y);
+      ctx.moveTo(halfW * 0.35, y); ctx.lineTo(hw, y);
+    } else {
+      ctx.moveTo(-hw, y); ctx.lineTo(hw, y);
+    }
+    ctx.stroke();
+    if (major && deg !== 0) {
+      ctx.fillText(String(Math.abs(deg)), -hw - scale * 0.035, y);
+      ctx.fillText(String(Math.abs(deg)), hw + scale * 0.035, y);
+    }
+  }
+  ctx.restore();
+
+  // ---- bank (roll) arc, fixed, top center — ticks fixed, pointer rotates ----
+  const arcY = cy - scale * 0.30, arcR = scale * 0.13;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, arcY, arcR, Math.PI * 1.22, Math.PI * 1.78);
+  ctx.stroke();
+  [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].forEach((deg) => {
+    const a = Math.PI * 1.5 - (deg * Math.PI) / 180;
+    const r2 = arcR - (deg % 30 === 0 ? scale * 0.02 : scale * 0.012);
+    ctx.beginPath();
+    ctx.moveTo(cx + arcR * Math.cos(a), arcY + arcR * Math.sin(a));
+    ctx.lineTo(cx + r2 * Math.cos(a), arcY + r2 * Math.sin(a));
+    ctx.stroke();
+  });
+  const pa = Math.PI * 1.5 + (roll * Math.PI) / 180;
+  const tipR = arcR + scale * 0.015, baseR = arcR - scale * 0.01, spread = 0.05;
+  ctx.beginPath();
+  ctx.moveTo(cx + tipR * Math.cos(pa), arcY + tipR * Math.sin(pa));
+  ctx.lineTo(cx + baseR * Math.cos(pa - spread), arcY + baseR * Math.sin(pa - spread));
+  ctx.lineTo(cx + baseR * Math.cos(pa + spread), arcY + baseR * Math.sin(pa + spread));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // ---- heading tape, fixed, near top edge ----
+  const tapeY = scale * 0.06, pxPerHdgDeg = scale * 0.011;
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(0, tapeY); ctx.lineTo(w, tapeY); ctx.stroke();
+  const start = Math.floor((heading - 60) / 10) * 10;
+  for (let hv = start; hv <= heading + 60; hv += 10) {
+    const x = cx + (hv - heading) * pxPerHdgDeg;
+    if (x < 0 || x > w) continue;
+    const hd = ((hv % 360) + 360) % 360;
+    const major = hd % 30 === 0;
+    ctx.beginPath();
+    ctx.moveTo(x, tapeY); ctx.lineTo(x, tapeY + (major ? scale * 0.02 : scale * 0.012));
+    ctx.stroke();
+    if (major) {
+      const label = hd === 0 ? "N" : hd === 90 ? "E" : hd === 180 ? "S" : hd === 270 ? "W" : String(hd);
+      ctx.fillText(label, x, tapeY + scale * 0.045);
+    }
+  }
+  ctx.beginPath();
+  ctx.moveTo(cx, tapeY - scale * 0.012); ctx.lineTo(cx - scale * 0.012, tapeY - scale * 0.03);
+  ctx.lineTo(cx + scale * 0.012, tapeY - scale * 0.03); ctx.closePath(); ctx.fill();
+  ctx.font = `700 ${Math.round(scale * 0.03)}px system-ui, sans-serif`;
+  ctx.fillText(`${Math.round(heading)}°`, cx, tapeY - scale * 0.05);
+  ctx.restore();
+
+  // ---- fixed center reticle ----
+  ctx.save();
+  ctx.lineWidth = Math.max(1.5, scale * 0.003);
+  ctx.beginPath();
+  ctx.moveTo(cx - scale * 0.03, cy); ctx.lineTo(cx - scale * 0.012, cy);
+  ctx.moveTo(cx + scale * 0.012, cy); ctx.lineTo(cx + scale * 0.03, cy);
+  ctx.moveTo(cx, cy - scale * 0.018); ctx.lineTo(cx, cy - scale * 0.006);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, scale * 0.006, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ---- video hints --------------------------------------------------------
 $("video").addEventListener("load", () => ($("video-hint").style.display = "none"));
 $("video").addEventListener("error", () => {
   $("video-hint").style.display = "block";
   $("video-hint").textContent = "No video – check droneweb/camera";
+});
+$("video-hq").addEventListener("load", () => ($("video-hq-hint").style.display = "none"));
+$("video-hq").addEventListener("error", () => {
+  $("video-hq-hint").style.display = "block";
+  $("video-hq-hint").textContent = "No video – check droneweb/HQ camera";
 });
 
 // ---- shutdown ------------------------------------------------------------
@@ -137,7 +261,7 @@ async function pollPrecland() {
     $("pl-lat").textContent = running && p.latency_ms != null ? p.latency_ms : "–";
     $("pl-hz").textContent = running && p.loop_hz != null ? p.loop_hz : "–";
     updateRecBtn(p.recording);
-    seedExposure(p.exposure);
+    exposureCtl.seed(p.exposure);
     renderCalib(p.calib);
     seedScale(p.cmd_scale);
   } catch (e) {}
@@ -186,48 +310,68 @@ function renderCalib(c) {
   }
 }
 
-// ---- exposure (field adjustment) ------------------------------------------
-const expAuto = $("exp-auto"), expUs = $("exp-us"), expGain = $("exp-gain");
-const expCard = $("exposure-card");
-let expSeeded = false, expTimer = null;
+// ---- exposure controls (precland cam + HQ/pilot cam use the same pattern) -
+function setupExposureControl(endpoint, ids) {
+  const auto = $(ids.auto), us = $(ids.us), gain = $(ids.gain);
+  const usVal = $(ids.usVal), gainVal = $(ids.gainVal), card = $(ids.card);
+  let seeded = false, timer = null;
 
-function reflectExposureUI() {
-  $("exp-us-val").textContent = expUs.value;
-  $("exp-gain-val").textContent = Number(expGain.value).toFixed(1);
-  expCard.classList.toggle("auto", expAuto.checked);
+  function reflect() {
+    usVal.textContent = us.value;
+    gainVal.textContent = Number(gain.value).toFixed(1);
+    card.classList.toggle("auto", auto.checked);
+  }
+
+  function send() {
+    fetch(endpoint, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auto: auto.checked,
+        exposure_us: Number(us.value),
+        gain: Number(gain.value),
+      }),
+    }).catch(() => {});
+  }
+
+  function onInput() {
+    reflect();
+    clearTimeout(timer);
+    timer = setTimeout(send, 120);   // debounce live drag
+  }
+
+  auto.addEventListener("change", () => { reflect(); send(); });
+  us.addEventListener("input", onInput);
+  gain.addEventListener("input", onInput);
+  reflect();
+
+  return {
+    // seeds the controls from server values the first time (e.g. previously set)
+    seed(exp) {
+      if (!exp || seeded) return;
+      seeded = true;
+      auto.checked = !!exp.auto;
+      us.value = exp.exposure_us;
+      gain.value = exp.gain;
+      reflect();
+    },
+  };
 }
 
-function sendExposure() {
-  fetch("/api/exposure", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      auto: expAuto.checked,
-      exposure_us: Number(expUs.value),
-      gain: Number(expGain.value),
-    }),
-  }).catch(() => {});
-}
+const exposureCtl = setupExposureControl("/api/exposure", {
+  auto: "exp-auto", us: "exp-us", gain: "exp-gain",
+  usVal: "exp-us-val", gainVal: "exp-gain-val", card: "exposure-card",
+});
+const exposureHqCtl = setupExposureControl("/api/exposure_hq", {
+  auto: "exp2-auto", us: "exp2-us", gain: "exp2-gain",
+  usVal: "exp2-us-val", gainVal: "exp2-gain-val", card: "exposure-hq-card",
+});
 
-function onExposureInput() {
-  reflectExposureUI();
-  clearTimeout(expTimer);
-  expTimer = setTimeout(sendExposure, 120);   // debounce live drag
+async function pollExposureHq() {
+  try {
+    const exp = await (await fetch("/api/exposure_hq", { cache: "no-store" })).json();
+    exposureHqCtl.seed(exp);
+  } catch (e) {}
 }
-
-// seeds the controls from server values the first time (e.g. previously set)
-function seedExposure(exp) {
-  if (!exp || expSeeded) return;
-  expSeeded = true;
-  expAuto.checked = !!exp.auto;
-  expUs.value = exp.exposure_us;
-  expGain.value = exp.gain;
-  reflectExposureUI();
-}
-
-expAuto.addEventListener("change", () => { reflectExposureUI(); sendExposure(); });
-expUs.addEventListener("input", onExposureInput);
-expGain.addEventListener("input", onExposureInput);
-reflectExposureUI();
 
 // ---- recording -------------------------------------------------------
 const recBtn = $("pl-rec");
@@ -355,25 +499,26 @@ async function pollRtk() {
   } catch (e) {}
 }
 
-// ---- draggable splitter between video and panel ---------------------------
-(function () {
-  const splitter = $("splitter"), main = document.querySelector("main");
-  if (!splitter || !main) return;
-  let dragging = false, leftPx = parseInt(localStorage.getItem("splitLeft"), 10) || 0;
+// ---- draggable splitter between video and panel (one per tab with video) --
+function setupSplitter(view, splitter, storageKey) {
+  if (!view || !splitter) return { applySaved() {} };
+  let dragging = false, leftPx = parseInt(localStorage.getItem(storageKey), 10) || 0;
 
   function apply(px) {
-    px = Math.max(240, Math.min(main.clientWidth - 240, px));   // min video / min panel
+    const bound = view.clientWidth;
+    if (!bound) return;
+    px = Math.max(240, Math.min(bound - 240, px));   // min video / min panel
     leftPx = px;
-    main.style.setProperty("--left", px + "px");
-    localStorage.setItem("splitLeft", px);
+    view.style.setProperty("--left", px + "px");
+    localStorage.setItem(storageKey, px);
   }
-  function down(e) { dragging = true; main.classList.add("dragging"); if (e.cancelable) e.preventDefault(); }
+  function down(e) { dragging = true; view.classList.add("dragging"); if (e.cancelable) e.preventDefault(); }
   function move(e) {
     if (!dragging) return;
-    apply((e.touches ? e.touches[0].clientX : e.clientX) - main.getBoundingClientRect().left);
+    apply((e.touches ? e.touches[0].clientX : e.clientX) - view.getBoundingClientRect().left);
     if (e.cancelable) e.preventDefault();
   }
-  function up() { dragging = false; main.classList.remove("dragging"); }
+  function up() { dragging = false; view.classList.remove("dragging"); }
 
   splitter.addEventListener("mousedown", down);
   splitter.addEventListener("touchstart", down, { passive: false });
@@ -381,15 +526,46 @@ async function pollRtk() {
   window.addEventListener("touchmove", move, { passive: false });
   window.addEventListener("mouseup", up);
   window.addEventListener("touchend", up);
-  window.addEventListener("resize", () => { if (leftPx) apply(leftPx); });   // keep within screen
-  if (leftPx) apply(leftPx);                                                 // restore saved position
-})();
+  window.addEventListener("resize", () => { if (leftPx && view.classList.contains("active")) apply(leftPx); });
+
+  return { applySaved() { if (leftPx) apply(leftPx); } };
+}
+
+const splitters = {
+  pilot: setupSplitter($("view-pilot"), $("splitter-pilot"), "splitLeft_pilot"),
+  precland: setupSplitter($("view-precland"), $("splitter-precland"), "splitLeft_precland"),
+};
+
+// ---- tabs ------------------------------------------------------------------
+// Video streams are attached/detached on tab switch (not left running in a hidden
+// tab) so the idle camera stays stopped and no bandwidth is wasted — same on-demand
+// principle as camera.py/camera_hq.py.
+const tabBtns = document.querySelectorAll(".tab-btn");
+const views = document.querySelectorAll(".view");
+const videoEl = $("video"), videoHqEl = $("video-hq");
+
+function showTab(name) {
+  tabBtns.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  views.forEach((v) => v.classList.toggle("active", v.dataset.view === name));
+  localStorage.setItem("activeTab", name);
+
+  if (name === "pilot") videoHqEl.src = "/video_hq.mjpg"; else videoHqEl.removeAttribute("src");
+  if (name === "precland") videoEl.src = "/video.mjpg"; else videoEl.removeAttribute("src");
+
+  const s = splitters[name];
+  if (s) s.applySaved();
+}
+
+tabBtns.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
 // ---- loop ------------------------------------------------------------------
-drawADI(0, 0);
+showTab(localStorage.getItem("activeTab") || "pilot");
+if (hudOn) drawHud("hud-pilot", 0, 0, 0);
+drawADI("adi-precland", 0, 0);
 pollTelemetry(); setInterval(pollTelemetry, 200);
 pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);
+pollExposureHq();
 pollRecordings(); setInterval(pollRecordings, 4000);
 pollNetwork(); setInterval(pollNetwork, 3000);
 pollRtk(); setInterval(pollRtk, 1000);   // 1 Hz → sub-second age still feels live
