@@ -72,6 +72,17 @@ def api_telemetry():
     return jsonify(tel.snapshot())
 
 
+@app.route("/api/mission")
+def api_mission():
+    return jsonify(tel.mission_snapshot())
+
+
+@app.route("/api/mission/read", methods=["POST"])
+def api_mission_read():
+    tel.read_mission()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/rtk")
 def api_rtk():
     st = rtkmon.status()

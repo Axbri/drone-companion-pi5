@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>dronepi</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -20,6 +21,7 @@
   <nav class="tabs">
     <button class="tab-btn" data-tab="pilot">Pilot view</button>
     <button class="tab-btn" data-tab="precland">Precision landing</button>
+    <button class="tab-btn" data-tab="map">Map</button>
     <button class="tab-btn" data-tab="system">System info</button>
   </nav>
 
@@ -173,6 +175,45 @@
       </aside>
     </section>
 
+    <section class="view" id="view-map" data-view="map">
+      <section class="map-wrap">
+        <div id="map"></div>
+      </section>
+
+      <div class="splitter" id="splitter-map" title="Drag to resize"></div>
+
+      <aside class="panel">
+        <div class="card">
+          <h2>Map layers</h2>
+          <div class="row"><span>Base layer</span>
+            <select id="map-basemap">
+              <option value="map">Map</option>
+              <option value="sat">Satellite</option>
+              <option value="topo">Topo</option>
+              <option value="cycl">Trails</option>
+            </select>
+          </div>
+          <label class="row chk"><span>Follow drone</span><input type="checkbox" id="map-follow" checked></label>
+          <label class="row chk"><span>Seamarks</span><input type="checkbox" id="map-seamarks"></label>
+          <label class="row chk"><span>Relief</span><input type="checkbox" id="map-relief"></label>
+          <label class="row chk"><span>Fence</span><input type="checkbox" id="map-lyr-fence" checked></label>
+          <label class="row chk"><span>Rally</span><input type="checkbox" id="map-lyr-rally" checked></label>
+          <label class="row chk"><span>Distance rings</span><input type="checkbox" id="map-lyr-rings"></label>
+        </div>
+
+        <div class="card">
+          <h2>Mission</h2>
+          <button id="map-read-mission" class="btn-arm">Read mission</button>
+          <button id="map-clear" class="btn-rec">Clear map</button>
+          <div class="row"><span>Waypoints</span><b><span id="map-wp-count">–</span></b></div>
+          <div class="row"><span>Fence points</span><b><span id="map-fence-count">–</span></b></div>
+          <div class="row"><span>Rally points</span><b><span id="map-rally-count">–</span></b></div>
+          <div class="hint-sm">Reads mission → fence → rally from the FC (chained). Clearing the map
+            only clears what's drawn here — it doesn't change anything on the vehicle.</div>
+        </div>
+      </aside>
+    </section>
+
     <section class="view view-single" id="view-system" data-view="system">
       <aside class="panel">
         <div class="card">
@@ -197,6 +238,7 @@
     </section>
   </main>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

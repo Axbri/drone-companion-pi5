@@ -100,7 +100,7 @@ main {
 }
 .splitter:hover, .view.dragging .splitter { background: var(--accent); }
 .view.dragging { cursor: col-resize; user-select: none; }
-.view.dragging .video-wrap, .view.dragging .panel { pointer-events: none; }
+.view.dragging .video-wrap, .view.dragging .map-wrap, .view.dragging .panel { pointer-events: none; }
 
 .video-wrap {
   position: relative;
@@ -132,6 +132,42 @@ main {
   height: 100%;
   pointer-events: none;
 }
+
+.map-wrap {
+  position: relative;
+  background: #0d1117;
+  overflow: hidden;
+}
+#map { width: 100%; height: 100%; }
+.drone-marker {
+  font-size: 28px;
+  color: var(--accent);
+  line-height: 1;
+  text-shadow: 0 0 2px #000, 0 0 4px #000, 0 0 2px #fff;
+  transition: transform 0.2s;
+}
+.wp-marker {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: #2d8fff;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #10406e;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+}
+.wp-marker.home {
+  width: auto; height: 20px; padding: 0 8px;
+  border-radius: 10px;
+  background: var(--good);
+  color: #06371c;
+  border-color: #14663a;
+  font-size: 10px;
+}
+.wp-marker.rally { background: #f59e0b; color: #3a2600; border-color: #8a5a00; }
 
 .panel {
   background: var(--panel);

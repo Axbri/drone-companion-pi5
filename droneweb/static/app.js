@@ -35,6 +35,9 @@ async function pollTelemetry() {
 
     if (hudOn) drawHud("hud-pilot", t.roll || 0, t.pitch || 0, t.heading || 0);
     drawADI("adi-precland", t.roll || 0, t.pitch || 0);
+
+    if (t.cur_wp !== undefined && t.cur_wp !== lastCurWp) { lastCurWp = t.cur_wp; if (mapInited) drawCurWp(t.cur_wp); }
+    updateMap(t);
   } catch (e) {
     $("link").className = "pill pill-bad";
     $("link").textContent = "offline";
@@ -515,6 +518,250 @@ async function pollRtk() {
   } catch (e) {}
 }
 
+// ---- map (Leaflet: mission, fence, rally, drone position/trail) ------------
+let map, droneMarker, trail, missionLayer, currentBase, mapCentered = false, lastMapTs = 0;
+let fenceLayer, rallyLayer, ringsLayer, curWpLayer, mapInited = false;
+let missionData = { items: [], jumps: [], fence: [], rally: [] };
+let missionVersion = -1, lastCurWp = null;
+
+// maxNativeZoom = deepest zoom the provider actually has; beyond it Leaflet upscales
+// the last real tiles (pixelated) instead of showing "map data not available".
+const BASE = {
+  map: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { zIndex: 1, maxNativeZoom: 19, maxZoom: 21, attribution: "© OpenStreetMap" }),
+  sat: L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { zIndex: 1, maxNativeZoom: 18, maxZoom: 21, attribution: "Imagery © Esri, Maxar, Earthstar Geographics" }),
+};
+BASE.topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+  { zIndex: 1, maxNativeZoom: 17, maxZoom: 21, attribution: "© OpenTopoMap (CC-BY-SA)" });
+BASE.cycl = L.tileLayer("https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",
+  { zIndex: 1, maxNativeZoom: 20, maxZoom: 21, attribution: "© CyclOSM, © OpenStreetMap" });
+// Transparent overlays; zIndex keeps them above whichever base is active
+const SEAMARK = L.tileLayer("https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
+  { zIndex: 10, maxNativeZoom: 18, maxZoom: 21, attribution: "© OpenSeaMap" });
+const HILLSHADE = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}",
+  { zIndex: 5, opacity: 0.45, maxNativeZoom: 16, maxZoom: 21, attribution: "Hillshade © Esri" });
+
+// Lazily created on first visit to the Map tab — Leaflet needs a container with
+// real (non-zero) dimensions when it initializes, which a hidden `.view` doesn't have.
+function initMap() {
+  map = L.map("map", { zoomControl: true }).setView([58.6005, 16.1319], 17);
+  currentBase = BASE.map;
+  currentBase.addTo(map);
+  $("map-basemap").addEventListener("change", () => {
+    map.removeLayer(currentBase);
+    currentBase = BASE[$("map-basemap").value] || BASE.map;
+    currentBase.addTo(map);
+  });
+  $("map-seamarks").addEventListener("change", () => {   // independent of the chosen base
+    if ($("map-seamarks").checked) SEAMARK.addTo(map);
+    else map.removeLayer(SEAMARK);
+  });
+  $("map-relief").addEventListener("change", () => {
+    if ($("map-relief").checked) HILLSHADE.addTo(map);
+    else map.removeLayer(HILLSHADE);
+  });
+
+  fenceLayer = L.layerGroup();
+  rallyLayer = L.layerGroup();
+  ringsLayer = L.layerGroup();
+  curWpLayer = L.layerGroup().addTo(map);        // current-target ring is always shown
+  const toggles = [["map-lyr-fence", () => fenceLayer], ["map-lyr-rally", () => rallyLayer],
+                   ["map-lyr-rings", () => ringsLayer]];
+  toggles.forEach(([id, get]) => {
+    const apply = () => { if ($(id).checked) get().addTo(map); else map.removeLayer(get()); };
+    $(id).addEventListener("change", apply);
+    apply();                                     // honour the initial checked state
+  });
+  trail = L.polyline([], { color: "#ff2d2d", weight: 3 }).addTo(map);   // drone trail (red)
+  missionLayer = L.layerGroup().addTo(map);
+  map.createPane("dronePane");                   // dedicated pane so the drone marker
+  map.getPane("dronePane").style.zIndex = 650;   // is ALWAYS above waypoint markers (600)
+  map.on("dragstart", () => { $("map-follow").checked = false; });   // panning turns off follow
+  drawCurWp(lastCurWp);
+}
+
+const ROUTE = { color: "#2d8fff", weight: 2.5, dashArray: "6,6" };
+const FENCE_LINE = { color: "#a855f7", weight: 2.5, dashArray: "6,6", fill: false };
+const FENCE_DOT = { radius: 4, color: "#a855f7", weight: 2,
+                    fillColor: "#a855f7", fillOpacity: 1 };
+// exclusion (keep-out) zones: red dashed outline + diagonal hatch fill (SVG pattern).
+// fillOpacity here is only the fallback if the pattern can't be applied.
+const FENCE_EXCL = { color: "#ff3b30", weight: 2.5, dashArray: "6,6",
+                     fillColor: "#ff3b30", fillOpacity: 0.12 };
+const FENCE_DOT_EXCL = { radius: 4, color: "#ff3b30", weight: 2,
+                         fillColor: "#ff3b30", fillOpacity: 1 };
+
+const SVGNS = "http://www.w3.org/2000/svg";
+function ensureHatch(svg) {
+  if (!svg || svg.querySelector("#hatch-excl")) return;
+  let defs = svg.querySelector("defs");
+  if (!defs) { defs = document.createElementNS(SVGNS, "defs"); svg.insertBefore(defs, svg.firstChild); }
+  const pat = document.createElementNS(SVGNS, "pattern");
+  pat.setAttribute("id", "hatch-excl");
+  pat.setAttribute("patternUnits", "userSpaceOnUse");
+  pat.setAttribute("width", "8");
+  pat.setAttribute("height", "8");
+  pat.setAttribute("patternTransform", "rotate(45)");
+  const line = document.createElementNS(SVGNS, "line");
+  line.setAttribute("x1", "0"); line.setAttribute("y1", "0");
+  line.setAttribute("x2", "0"); line.setAttribute("y2", "8");
+  line.setAttribute("stroke", "#ff3b30");
+  line.setAttribute("stroke-width", "2.5");
+  pat.appendChild(line);
+  defs.appendChild(pat);
+}
+function applyHatch(layer) {
+  const path = layer && layer._path;
+  if (!path || !path.ownerSVGElement) return;
+  ensureHatch(path.ownerSVGElement);
+  path.setAttribute("fill", "url(#hatch-excl)");
+  path.setAttribute("fill-opacity", "1");
+}
+
+function drawFence(shapes) {
+  fenceLayer.clearLayers();
+  (shapes || []).forEach((s) => {
+    const excl = s.inclusion === false;                       // keep-out zone
+    const line = excl ? FENCE_EXCL : FENCE_LINE;
+    const dot = excl ? FENCE_DOT_EXCL : FENCE_DOT;
+    if (s.type === "polygon" && s.points.length > 1) {
+      const poly = L.polygon(s.points, line)                  // dashed, closes the loop
+        .bindTooltip(excl ? "Fence (no-go area)" : "Fence (allowed area)");
+      if (excl) poly.on("add", () => applyHatch(poly));       // also when the layer is toggled on
+      poly.addTo(fenceLayer);
+      if (excl) applyHatch(poly);
+      s.points.forEach((p) => L.circleMarker(p, dot).addTo(fenceLayer));
+    } else if (s.type === "circle") {
+      const circ = L.circle([s.lat, s.lon], Object.assign({ radius: s.radius }, line))
+        .bindTooltip(`Fence circle ${Math.round(s.radius)} m (${excl ? "no-go" : "allowed"})`);
+      if (excl) circ.on("add", () => applyHatch(circ));
+      circ.addTo(fenceLayer);
+      if (excl) applyHatch(circ);
+    } else if (s.type === "return") {
+      L.circleMarker([s.lat, s.lon], FENCE_DOT).addTo(fenceLayer)
+        .bindTooltip("Fence return point");
+    }
+  });
+}
+
+function drawRally(pts) {
+  rallyLayer.clearLayers();
+  (pts || []).forEach((r) => {
+    L.marker([r.lat, r.lon], { icon: L.divIcon({ className: "", iconSize: [26, 22],
+      iconAnchor: [13, 11], html: `<div class="wp-marker rally">R${r.seq}</div>` }) })
+      .addTo(rallyLayer).bindTooltip("Rally " + r.seq);
+  });
+}
+
+function drawRings() {
+  ringsLayer.clearLayers();
+  const home = missionData.items.find((w) => w.seq === 0);
+  if (!home) return;
+  [50, 100, 200].forEach((r) => {
+    L.circle([home.lat, home.lon], { radius: r, color: "#8aa0b3", weight: 1,
+      dashArray: "3,6", fill: false }).addTo(ringsLayer).bindTooltip(r + " m");
+  });
+}
+
+function drawCurWp(seq) {
+  if (!curWpLayer) return;
+  curWpLayer.clearLayers();
+  const w = missionData.items.find((x) => x.seq === seq);
+  if (!w || seq === 0) return;
+  L.circleMarker([w.lat, w.lon], { radius: 15, color: "#2d8fff", weight: 3, fill: false })
+    .addTo(curWpLayer).bindTooltip("Heading to WP " + seq);
+}
+
+function drawMission(d) {
+  if (!missionLayer) return;
+  missionData = { items: d.items || [], jumps: d.jumps || [],
+                  fence: d.fence || [], rally: d.rally || [] };
+  const items = missionData.items, jumps = missionData.jumps;
+  missionLayer.clearLayers();
+  const pts = [], bySeq = {};
+  items.forEach((w) => {
+    const ll = [w.lat, w.lon]; pts.push(ll); bySeq[w.seq] = ll;
+    const home = w.seq === 0;   // ArduPilot mission item 0 is Home, not a real waypoint
+    const icon = L.divIcon({
+      className: "",
+      iconSize: home ? [46, 22] : [22, 22],
+      iconAnchor: home ? [23, 11] : [11, 11],
+      html: home ? `<div class="wp-marker home">Home</div>` : `<div class="wp-marker">${w.seq}</div>`,
+    });
+    L.marker(ll, { icon }).addTo(missionLayer).bindTooltip(home ? "Home" : "WP " + w.seq);
+  });
+  if (pts.length > 1) L.polyline(pts, ROUTE).addTo(missionLayer);
+  // DO_JUMP: draw the loop-back leg from the last waypoint before the jump to its target
+  (jumps || []).forEach((j) => {
+    const before = items.filter((w) => w.seq < j.seq).pop();
+    const target = bySeq[j.target];
+    if (before && target) {
+      L.polyline([[before.lat, before.lon], target], ROUTE).addTo(missionLayer)
+        .bindTooltip(`DO_JUMP → WP ${j.target}`);
+    }
+  });
+  drawFence(missionData.fence);
+  drawRally(missionData.rally);
+  drawRings();
+  drawCurWp(lastCurWp);
+  $("map-wp-count").textContent = items.length;
+  $("map-fence-count").textContent = missionData.fence.length;
+  $("map-rally-count").textContent = missionData.rally.length;
+}
+
+$("map-read-mission").addEventListener("click", () => {
+  fetch("/api/mission/read", { method: "POST" }).catch(() => {});
+});
+$("map-clear").addEventListener("click", () => {          // clear everything drawn from the mission read
+  [missionLayer, fenceLayer, rallyLayer, ringsLayer, curWpLayer]
+    .forEach((l) => l && l.clearLayers());
+  missionData = { items: [], jumps: [], fence: [], rally: [] };
+  lastCurWp = null;
+  $("map-wp-count").textContent = "–";
+  $("map-fence-count").textContent = "–";
+  $("map-rally-count").textContent = "–";
+});
+
+async function pollMission() {
+  try {
+    const m = await (await fetch("/api/mission", { cache: "no-store" })).json();
+    // Gate the version-tracking itself on mapInited, not just the draw call: if the
+    // mission was already read before the Map tab was ever opened, the version-change
+    // edge must stay pending, or initMap() would find a stale missionVersion and never
+    // draw the data that's actually sitting on the server. Counts are set inside
+    // drawMission() (from missionData, not straight off the poll) so "Clear map" stays
+    // cleared until the next actual read, instead of being overwritten within 2s.
+    if (mapInited && m.version !== missionVersion) {
+      missionVersion = m.version;
+      drawMission(m);
+    }
+  } catch (e) {}
+}
+
+function updateMap(t) {
+  if (!mapInited || t.lat == null) return;
+  const now = Date.now();
+  if (now - lastMapTs < 500) return;      // throttle to 2 Hz
+  lastMapTs = now;
+  const ll = [t.lat, t.lon];
+  const icon = L.divIcon({
+    className: "", html: `<div class="drone-marker" style="transform:rotate(${(t.heading || 0) - 90}deg)">➤</div>`,
+    // -90: the ➤ glyph points RIGHT at rest, while heading 0 means north (up) —
+    // without the correction the arrow would point 90° off from actual heading.
+    iconSize: [24, 24], iconAnchor: [12, 12],
+  });
+  if (!droneMarker) droneMarker = L.marker(ll, { icon, pane: "dronePane" }).addTo(map);
+  else { droneMarker.setLatLng(ll); droneMarker.setIcon(icon); }
+  const pts = trail.getLatLngs(); pts.push(ll);
+  if (pts.length > 500) pts.shift();
+  trail.setLatLngs(pts);
+  if ($("map-follow").checked) {           // only recenter when "Follow drone" is ticked
+    map.setView(ll, mapCentered ? map.getZoom() : 18);
+    mapCentered = true;
+  }
+}
+
 // ---- draggable splitter between video and panel (one per tab with video) --
 function setupSplitter(view, splitter, storageKey) {
   if (!view || !splitter) return { applySaved() {} };
@@ -550,6 +797,7 @@ function setupSplitter(view, splitter, storageKey) {
 const splitters = {
   pilot: setupSplitter($("view-pilot"), $("splitter-pilot"), "splitLeft_pilot"),
   precland: setupSplitter($("view-precland"), $("splitter-precland"), "splitLeft_precland"),
+  map: setupSplitter($("view-map"), $("splitter-map"), "splitLeft_map"),
 };
 
 // ---- tabs ------------------------------------------------------------------
@@ -568,6 +816,13 @@ function showTab(name) {
   if (name === "pilot") videoHqEl.src = "/video_hq.mjpg"; else videoHqEl.removeAttribute("src");
   if (name === "precland") videoEl.src = "/video.mjpg"; else videoEl.removeAttribute("src");
 
+  if (name === "map") {
+    if (!mapInited) { initMap(); mapInited = true; }
+    // Leaflet sized itself against a hidden (zero-size) container at init, or the
+    // splitter may have moved while this tab was hidden — fix both up now.
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+
   const s = splitters[name];
   if (s) s.applySaved();
 }
@@ -585,3 +840,4 @@ pollExposureHq();
 pollRecordings(); setInterval(pollRecordings, 4000);
 pollNetwork(); setInterval(pollNetwork, 3000);
 pollRtk(); setInterval(pollRtk, 1000);   // 1 Hz → sub-second age still feels live
+pollMission(); setInterval(pollMission, 2000);

@@ -17,6 +17,13 @@ DEFAULT_URL = "udpout:127.0.0.1:14551"
 ATTITUDE_HZ = 20   # HUD smoothness — ArduPilot's default ATTITUDE stream rate is
                    # only ~4Hz; the 921600 baud FC link has plenty of headroom for this.
 
+# ---- mission/fence/rally download (MAVLink mission protocol), för Map-fliken --------
+FC_SYS, FC_COMP = 1, 1          # ArduPilot FC:s standard sysid/compid
+MT_MISSION, MT_FENCE, MT_RALLY = 0, 1, 2
+GLOBAL_FRAMES = {0, 3, 5, 6, 10, 11}   # MAV_FRAME_* globala varianter (x=lat*1e7, y=lon*1e7)
+MISSION_DL_RETRY_S = 2.0
+MISSION_DL_MAX_TRIES = 6
+
 
 class MavlinkTelemetry:
     def __init__(self, url=DEFAULT_URL):
@@ -26,6 +33,9 @@ class MavlinkTelemetry:
         self._send_lock = threading.Lock()   # serialisera sändningar (flera trådar)
         self.master = None
         self._connected = False
+        self._mission = {"version": 0, "items": [], "jumps": [], "fence": [], "rally": []}
+        self._mdl = {"active": False, "mtype": 0, "count": -1, "items": {},
+                     "last_req": 0.0, "tries": 0}
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -43,6 +53,8 @@ class MavlinkTelemetry:
                     if now - last_hb > 1.0:
                         self._send_heartbeat()
                         last_hb = now
+                    if self._mdl["active"] and now - self._mdl["last_req"] > MISSION_DL_RETRY_S:
+                        self._retry_mission_dl()
                     msg = self.master.recv_match(blocking=True, timeout=2)
                     if msg is not None:
                         self._handle(msg)
@@ -79,6 +91,30 @@ class MavlinkTelemetry:
 
     def _handle(self, msg):
         t = msg.get_type()
+        # Mission-nedladdning (mission/fence/rally): eget tillstånd + uppföljande
+        # sändningar, hanteras separat från det enkla fält-mergen nedan.
+        if t == "MISSION_COUNT" and self._mdl["active"] \
+                and getattr(msg, "mission_type", 0) == self._mdl["mtype"]:
+            with self._lock:
+                self._mdl["count"] = msg.count
+                self._mdl["items"] = {}
+            if msg.count == 0:
+                self._finalize_mission()
+            else:
+                self._request_mission_item(0)
+            return
+        if t == "MISSION_ITEM_INT" and self._mdl["active"] \
+                and getattr(msg, "mission_type", 0) == self._mdl["mtype"]:
+            with self._lock:
+                self._mdl["items"][msg.seq] = msg
+                done = len(self._mdl["items"]) >= self._mdl["count"]
+            if done:
+                self._finalize_mission()
+            else:
+                nxt = next(i for i in range(self._mdl["count"]) if i not in self._mdl["items"])
+                self._request_mission_item(nxt)
+            return
+
         d = {}
         if t == "ATTITUDE":
             d["roll"] = round(math.degrees(msg.roll), 1)
@@ -102,10 +138,128 @@ class MavlinkTelemetry:
         elif t == "GPS_RAW_INT":
             d["fix_type"] = msg.fix_type
             d["satellites"] = msg.satellites_visible
+        elif t == "GLOBAL_POSITION_INT":
+            d["lat"] = msg.lat / 1e7
+            d["lon"] = msg.lon / 1e7
+        elif t == "MISSION_CURRENT":
+            d["cur_wp"] = msg.seq
         if d:
             with self._lock:
                 self._data.update(d)
                 self._data["updated"] = round(time.time(), 1)
+
+    # ---- mission/fence/rally-nedladdning ---------------------------------
+    def read_mission(self):
+        """Starta läsning av mission → fence → rally (kedjad), för Map-fliken."""
+        self._start_dl(MT_MISSION)
+
+    def mission_snapshot(self):
+        with self._lock:
+            return dict(self._mission)
+
+    def _start_dl(self, mtype):
+        with self._lock:
+            self._mdl.update(active=True, mtype=mtype, count=-1, items={},
+                             last_req=time.time(), tries=0)
+        with self._send_lock:
+            self.master.mav.mission_request_list_send(FC_SYS, FC_COMP, mtype)
+
+    def _request_mission_item(self, seq):
+        with self._lock:
+            self._mdl["last_req"] = time.time()
+        with self._send_lock:
+            self.master.mav.mission_request_int_send(FC_SYS, FC_COMP, seq, self._mdl["mtype"])
+
+    def _retry_mission_dl(self):
+        """Kallas när nedladdningen stannat > MISSION_DL_RETRY_S — en tappad
+        request skulle annars fastna för alltid."""
+        with self._lock:
+            self._mdl["tries"] += 1
+            tries, mt, count = self._mdl["tries"], self._mdl["mtype"], self._mdl["count"]
+        if tries > MISSION_DL_MAX_TRIES:
+            if mt == MT_FENCE:                # håll kedjan igång så den ändå blir klar
+                with self._lock:
+                    self._mission["fence"] = []
+                self._start_dl(MT_RALLY)
+            elif mt == MT_RALLY:
+                with self._lock:
+                    self._mission["rally"] = []
+                    self._mission["version"] += 1
+                    self._mdl["active"] = False
+            else:
+                with self._lock:
+                    self._mdl["active"] = False
+        elif count <= 0:
+            with self._lock:
+                self._mdl["last_req"] = time.time()
+            with self._send_lock:
+                self.master.mav.mission_request_list_send(FC_SYS, FC_COMP, mt)
+        else:
+            with self._lock:
+                missing = [i for i in range(count) if i not in self._mdl["items"]]
+            if missing:
+                self._request_mission_item(missing[0])
+
+    def _parse_fence(self, by_seq):
+        """ArduPilot fence-objekt -> ritbara former (polygoner, cirklar, return point).
+        MAV_CMD: 5000 RETURN_POINT, 5001/5002 POLYGON_VERTEX incl/excl (param1 = antal
+        hörn), 5003/5004 CIRCLE incl/excl (param1 = radie)."""
+        shapes, seqs, i = [], sorted(by_seq), 0
+        while i < len(seqs):
+            it = by_seq[seqs[i]]
+            cmd = it.command
+            if cmd in (5001, 5002):
+                n = int(it.param1) or 1
+                pts = []
+                for k in range(n):
+                    if i + k >= len(seqs):
+                        break
+                    v = by_seq[seqs[i + k]]
+                    if v.command != cmd:
+                        break
+                    pts.append([v.x / 1e7, v.y / 1e7])
+                shapes.append({"type": "polygon", "inclusion": cmd == 5001, "points": pts})
+                i += max(1, len(pts))
+            elif cmd in (5003, 5004):
+                shapes.append({"type": "circle", "inclusion": cmd == 5003,
+                               "lat": it.x / 1e7, "lon": it.y / 1e7, "radius": float(it.param1)})
+                i += 1
+            elif cmd == 5000:
+                shapes.append({"type": "return", "lat": it.x / 1e7, "lon": it.y / 1e7})
+                i += 1
+            else:
+                i += 1
+        return shapes
+
+    def _finalize_mission(self):
+        mt = self._mdl["mtype"]
+        with self._send_lock:
+            self.master.mav.mission_ack_send(FC_SYS, FC_COMP, 0, mt)
+
+        if mt == MT_MISSION:
+            items, jumps = [], []
+            for s in sorted(self._mdl["items"]):
+                it = self._mdl["items"][s]
+                if it.command == mavutil.mavlink.MAV_CMD_DO_JUMP:   # 177: inga koord., param1 = mål
+                    jumps.append({"seq": s, "target": int(it.param1), "repeat": int(it.param2)})
+                elif it.frame in GLOBAL_FRAMES and (it.x or it.y):
+                    items.append({"seq": s, "lat": it.x / 1e7, "lon": it.y / 1e7, "cmd": it.command})
+            with self._lock:
+                self._mission["items"] = items
+                self._mission["jumps"] = jumps
+            self._start_dl(MT_FENCE)
+        elif mt == MT_FENCE:
+            shapes = self._parse_fence(self._mdl["items"])
+            with self._lock:
+                self._mission["fence"] = shapes
+            self._start_dl(MT_RALLY)
+        else:                                                        # MT_RALLY -> klar
+            rally = [{"seq": s, "lat": self._mdl["items"][s].x / 1e7, "lon": self._mdl["items"][s].y / 1e7}
+                     for s in sorted(self._mdl["items"]) if (self._mdl["items"][s].x or self._mdl["items"][s].y)]
+            with self._lock:
+                self._mission["rally"] = rally
+                self._mission["version"] += 1
+                self._mdl["active"] = False
 
     # ---- publikt API ----------------------------------------------------
     def snapshot(self):
