@@ -170,7 +170,7 @@ function drawHud(canvasId, roll, pitch, heading) {
   ctx.restore();
 
   // ---- bank (roll) arc, fixed, upper-center — ticks fixed, pointer rotates ----
-  const arcY = cy - scale * 0.09, arcR = scale * 0.24;
+  const arcY = cy - scale * 0.05, arcR = scale * 0.24;
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, arcY, arcR, Math.PI * 1.22, Math.PI * 1.78);
