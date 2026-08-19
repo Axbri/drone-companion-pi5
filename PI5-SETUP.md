@@ -121,13 +121,18 @@ Confirm the drone reaches `homebase:2101` over the tailnet.
 - RTK card: base connected + RTCM flowing + GPS RTK.
 - **Latency readout** (precland card "Latens (PI)"): should be **~15–25 ms** at high loop-Hz even with
   4G video + telemetry running — the whole point of the upgrade. If still high, check camera FrameRate
-  (`FPS` in `camera.py`, currently 25) ≈ the achieved loop rate, `buffer_count=2`.
+  (`FPS` in `camera.py`, now 40) ≈ the achieved loop rate, `buffer_count=1` (2 caused backlog on Pi 5
+  at 40Hz — see camera.py comments). Measured on the bench 2026-08-18: ~19-21ms @ ~40Hz, stable.
 
-## FC params (already on the Cube, unchanged by the Pi swap — for reference)
-`PLND_ENABLED=1, PLND_TYPE=1, PLND_EST_TYPE=0` (raw), `RNGFND1_TYPE=10/ORIENT=25`,
-GPS1_TYPE=25 (UM982), `SERIALx` for the Pi link @921600. Backup: `cube-full-params-*.param`.
-Precland tuning is unresolved (latency-driven tilt-coupling) — the Pi 5 latency drop is the current fix
-attempt; re-fly a supervised LAND from 3 m and analyze the recording (`ox/oy` vs t).
+## FC params (Cube — for reference; verify live, this file is a snapshot)
+`PLND_ENABLED=1, PLND_TYPE=1, PLND_EST_TYPE=1` (Kalman, switched from raw 2026-08-18),
+`PLND_LAG=0.025` (25ms — lowered from 0.25 to match the Pi 5's measured ~20ms pipeline latency
+at 40Hz; was set high for the old Pi 3A+), `RNGFND1_TYPE=10/ORIENT=25`,
+GPS1_TYPE=25 (UM982), `SERIALx` for the Pi link @921600. Backup: `cube-full-params-*.param` (stale —
+predates the Pi 5 migration params above; re-export before trusting it).
+Precland tuning is unresolved (latency-driven tilt-coupling) — the Pi 5 latency drop + Kalman filter +
+matched PLND_LAG is the current fix attempt; re-fly a supervised LAND from 3 m and analyze the
+recording (`ox/oy` vs t).
 
 ## Finish
 Once verified in flight: rename `dronepi5` → `dronepi` (hostnamectl + Tailscale) and retire the Pi 3A+.

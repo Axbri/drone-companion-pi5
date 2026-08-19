@@ -154,14 +154,22 @@ class PrecLandDetector:
         return bgr
 
 
-# ---- kamera-montering → kroppsframe (BODY_FRD) -------------------------
-# MÅSTE verifieras på bänk/i flygning: flytta målet mot nosen → body_x ska bli
-# positiv; mot höger → body_y positiv. Antagande: bildens överkant = drönarnos,
-# bildens höger = drönarens höger. Ändra här om kameran är monterad annorlunda.
-def image_to_body(ax_img, ay_img):
-    body_x = -ay_img   # mål mot bild-topp (ay<0) = framåt (+x)
-    body_y = ax_img    # mål mot bild-höger (ax>0) = höger (+y)
-    return body_x, body_y
+# ---- kamera→kropp-rotationen görs av ArduPilot, INTE här ---------------
+# 2026-08-19, rotfelet hittat: vi transformerade bild→kropp HÄR (en tidigare
+# image_to_body(), body_x=-ay_img/body_y=ax_img — bänktest bekräftade att DEN
+# var geometriskt rätt) och skickade sedan resultatet som angle_x/angle_y i
+# LANDING_TARGET. Men ArduPilots egen mottagare gör SAMMA rotation internt:
+# AC_PrecLand_MAVLink::handle_msg() (github.com/ArduPilot/ardupilot,
+# libraries/AC_PrecLand/AC_PrecLand_MAVLink.cpp) bygger siktlinjen som
+#   vec_body_frd = { -tan(angle_y), tan(angle_x), 1.0 }   // (forward, right, down)
+# dvs den FÖRVÄNTAR SIG rå bildvinkel (kamerans egna ax/ay), inte en redan
+# kropps-roterad vinkel — och roterar själv till BODY_FRD. Vi roterade två
+# gånger → nettoeffekt 90°, exakt matchande flygtestets fyra videobilder
+# (mål fram→styrde höger, mål bak→vänster, mål vänster→fram, mål höger→bak;
+# alla fyra stämmer med denna dubbelrotations-hypotes, testad i efterhand).
+# Fix: skicka RÅ ax/ay direkt (nedan) — ingen egen kropps-transform.
+# PLND_YAW_ALIGN ska vara 0 (bänktestat: kameran är monterad exakt som
+# ArduPilot antar, bild-topp = nos, ingen fysisk vridning att kompensera för).
 
 
 REC_DIR = "/home/axel/recordings"
@@ -182,8 +190,10 @@ class PrecLandController:
 
     RATE_HZ = 40          # kontroll-loopens tak (matchar kamera-FPS). Tung JPEG-encode + inspelning
                           # körs i separat writer-tråd, så detekt+skick av LANDING_TARGET tightas
-                          # (mot översläng/latens — Fynd 2). CV-bundet tak ~35 Hz på Pi 3A+ isolerat;
-                          # verklig takt lägre med kontention men klart över de gamla ~10-14 Hz.
+                          # (mot översläng/latens — Fynd 2). Pi 5, 2026-08-18: 40 Hz stabilt/repeterbart
+                          # (39.7-40.2 Hz uppmätt över 18s). >40 (testat 60/90) gav samma latens men
+                          # ostabil takt (30-53 Hz) pga GIL-delning med app.js webb-pollningen — inte
+                          # kamera/ISP-bunden. 40 är alltså sweetspoten, inte en hård kamera-gräns.
     REC_FPS = 8           # AVI-fps-metadata (nominell). Verklig inspelningstakt är writer-begränsad;
                           # CSV:ns t-kolumn är den exakta tiden per ruta (ruta N = CSV-rad N).
     ARUCO_MAX_AGL = 3.5   # m — under detta föredras ArUco framför färg
@@ -336,9 +346,8 @@ class PrecLandController:
             ax, ay = target.angles()
             ox, oy = target.offset_norm()
             if phase != PHASE_RTK and self._armed:
-                bx, by = image_to_body(ax, ay)
                 k = self._cmd_scale                      # styrskala: mildare korrektion
-                self.tel.send_landing_target(bx * k, by * k, agl if agl else 0.0)
+                self.tel.send_landing_target(ax * k, ay * k, agl if agl else 0.0)
                 sent = True
                 self._tx += 1
 

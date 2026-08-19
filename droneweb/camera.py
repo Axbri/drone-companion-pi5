@@ -16,11 +16,18 @@ from picamera2 import Picamera2
 from picamera2.encoders import MJPEGEncoder
 from picamera2.outputs import FileOutput
 
+SENSOR_MODEL = "imx219"   # precland-kameran; Pi 5 har numera även en imx477 (12MP) på den
+                          # andra CSI-porten — Picamera2() utan argument tar Num 0, vilket INTE
+                          # längre är garanterat imx219, så vi slår upp rätt kamera via modellnamn.
+
 MAIN_SIZE = (1024, 768)   # 4:3, full FOV (IMX219 är 4:3)
 LORES_SIZE = (640, 480)   # gråskala-Y för CV
-FPS = 25                  # matchar CV-loopens takt (~26 Hz) → färska rutor, min latens (~67ms).
-                          # Högre (40) bygger backlog → HÖGRE latens; lägre (<20) tappar takt.
-                          # (påverkar även FPV-videon → mer 4G-data när man tittar; ofarligt)
+FPS = 40                  # Pi 5-tuning 2026-08-18: 25 var en Pi 3A+-gräns (CPU-bunden backlog vid
+                          # buffer_count=2 + FrameRate 40 där). Roten var buffer_count, inte FPS —
+                          # med buffer_count=1 (nedan) föll latensen på Pi 5 från ~23ms@25Hz till
+                          # ~19-21ms@40Hz. >40 gav mer jitter (GIL-delning med webb-pollningen i
+                          # app.js) utan lägre latens — 40 är den stabila sweetspoten. Se PI5-SETUP.md.
+                          # (höjd FPS påverkar även FPV-videon → mer 4G-data när man tittar; ofarligt)
 
 
 class StreamingOutput(io.BufferedIOBase):
@@ -39,15 +46,26 @@ class StreamingOutput(io.BufferedIOBase):
             self.condition.notify_all()
 
 
+def _find_camera_num(model=SENSOR_MODEL):
+    """Hitta Picamera2-index för given sensormodell. Faller tillbaka till 0
+    (med varning) om modellen inte hittas, t.ex. om kameran kopplats loss."""
+    for info in Picamera2.global_camera_info():
+        if info.get("Model") == model:
+            return info["Num"]
+    print(f"[camera] VARNING: hittade ingen {model}-kamera, faller tillbaka till Num 0 "
+          f"({[i.get('Model') for i in Picamera2.global_camera_info()]})")
+    return 0
+
+
 class Camera:
     def __init__(self):
-        self._picam2 = Picamera2()
+        self._picam2 = Picamera2(_find_camera_num())
         cfg = self._picam2.create_video_configuration(
             main={"size": MAIN_SIZE, "format": "YUV420"},
             lores={"size": LORES_SIZE, "format": "YUV420"},
             controls={"FrameRate": FPS},
-            buffer_count=2,   # låg buffert → capture_request ger färsk ruta (min latens),
-                              # inte en kö av gamla. Vi kopierar+släpper direkt så 2 räcker.
+            buffer_count=1,   # låg buffert → capture_request ger färsk ruta (min latens), inte en
+                              # kö av gamla. Vi kopierar+släpper direkt så 1 räcker (2 gav backlog).
         )
         self._picam2.configure(cfg)
         self._output = StreamingOutput()

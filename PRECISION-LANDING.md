@@ -195,6 +195,37 @@ hoppas över i ARUCO/RTK-fas när ingen tittar/spelar in. **OBS inspelnings-sema
 samplas nu i writer-takt (kan tappa rutor vid last), INTE en rad per skick; sann skick-räkning i status
 `tx`. Rollback: `precland.py.prethread.bak` på Pi:n.
 
+## Flygtest #3 — Pi 5, 40Hz: dubbel kamera→kropp-rotation (2026-08-18/19)
+
+Efter Pi 5-migreringen (40Hz, ~20ms latens, `PLND_EST_TYPE=1` Kalman, `PLND_LAG=0.025`) flögs
+Precision-Loiter igen med mycket låg styrskala för att se korrektionsriktningen tydligt. **Samma
+oscillation som förut, men nu tydligt orsakad av fel riktning, inte latens:** mål fram om nosen fick
+drönaren att styra höger, mål bak → vänster, mål till vänster → framåt, mål till höger → bakåt
+(fyra videobilder med inritad styrriktning, 2026-08-18) → cirklade runt plattan i stället för att
+flyga in.
+
+**Felsökning (2026-08-19):** Ett bänktest (markör fysiskt fram/bak/vänster om drönaren, avläst i
+webbens Offset-fält, ingen FC inblandad) visade att **bildgeometrin var korrekt** — kameran är
+monterad exakt som antaget (bild-topp = nos, ingen fysisk vridning). Det uteslöt en felmonterad
+kamera. Verklig grundorsak hittad i ArduPilots källkod
+(`libraries/AC_PrecLand/AC_PrecLand_MAVLink.cpp`, `handle_msg()`):
+```cpp
+_los_meas.vec_unit = Vector3f{-tanf(packet.angle_y), tanf(packet.angle_x), 1.0f};  // (forward, right, down)
+```
+ArduPilot **roterar redan själv** från kamerans bildvinklar till BODY_FRD — den förväntar sig råa
+bildvinklar (angle_x/angle_y = kamerans egna horisontell/vertikal-vinkel), inte en vinkel vi redan
+roterat till kroppsram. Vår gamla `image_to_body()` (`body_x=-ay_img, body_y=ax_img`) gjorde SAMMA
+rotation en gång till innan skick → nettoeffekt 90°. Matchar exakt alla fyra videobilderna (testat
+i efterhand mot denna hypotes).
+
+**Fix** (`precland.py`, `_control_tick`): skicka råa `ax, ay` direkt till `send_landing_target()`,
+ingen egen kropps-transform. `image_to_body()` borttagen (ersatt med förklarande kommentar).
+`PLND_YAW_ALIGN` lämnas på 0 (bänktestat: ingen fysisk vridning att kompensera för).
+
+**Ej flygtestad ännu.** Nästa steg enligt test-stegen ovan: **hovring ~3 m, PRECLAND armerat,
+INGEN LAND** — flytta/styr in mot plattan från vänster och bekräfta att drönaren nu lutar mot
+vänster (inte framåt/bakåt) innan nästa landningsförsök. Höj styrskalan gradvis mot 1,0 efter det.
+
 ## Uppskjutet
 
 - **Yaw-inriktning** (vrida drönaren mot markören) via RC-yaw-override — egen testiteration.
