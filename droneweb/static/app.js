@@ -6,7 +6,7 @@ const setText = (sel, text) => document.querySelectorAll(sel).forEach((el) => (e
 
 const FIX = { 0: "None", 1: "No fix", 2: "2D", 3: "3D", 4: "DGPS", 5: "RTK-Float", 6: "RTK-Fixed" };
 
-// ---- telemetry (~5 Hz) -----------------------------------------------------
+// ---- telemetry (~10 Hz) -----------------------------------------------------
 async function pollTelemetry() {
   try {
     const t = await (await fetch("/api/telemetry", { cache: "no-store" })).json();
@@ -150,7 +150,7 @@ function drawHud(canvasId, roll, pitch, heading) {
   ctx.rotate((-roll * Math.PI) / 180);
   // Spacing/range tuned for a quadcopter's normal envelope (rarely > ~30deg
   // roll/pitch) rather than a fixed-wing's full ±90deg ladder.
-  const pxPerDeg = scale * 0.024, halfW = scale * 0.15;
+  const pxPerDeg = scale * 0.0288, halfW = scale * 0.15;
   for (let deg = -40; deg <= 40; deg += 10) {
     const y = (pitch - deg) * pxPerDeg;
     if (Math.abs(y) > scale * 0.48) continue;
@@ -172,7 +172,7 @@ function drawHud(canvasId, roll, pitch, heading) {
   ctx.restore();
 
   // ---- bank (roll) arc, fixed, upper-center — ticks fixed, pointer rotates ----
-  const arcY = cy - scale * 0.05, arcR = scale * 0.24;
+  const arcY = cy - scale * 0.02, arcR = scale * 0.30;
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, arcY, arcR, Math.PI * 1.22, Math.PI * 1.78);
@@ -578,7 +578,7 @@ tabBtns.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab))
 showTab(localStorage.getItem("activeTab") || "pilot");
 if (hudOn) drawHud("hud-pilot", 0, 0, 0);
 drawADI("adi-precland", 0, 0);
-pollTelemetry(); setInterval(pollTelemetry, 200);
+pollTelemetry(); setInterval(pollTelemetry, 100);   // 10Hz — HUD smoothness (see ATTITUDE_HZ in mavlink.py)
 pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);
 pollExposureHq();

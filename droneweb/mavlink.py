@@ -14,6 +14,8 @@ import time
 from pymavlink import mavutil
 
 DEFAULT_URL = "udpout:127.0.0.1:14551"
+ATTITUDE_HZ = 20   # HUD smoothness — ArduPilot's default ATTITUDE stream rate is
+                   # only ~4Hz; the 921600 baud FC link has plenty of headroom for this.
 
 
 class MavlinkTelemetry:
@@ -35,6 +37,7 @@ class MavlinkTelemetry:
                     self.url, source_system=200, source_component=191
                 )
                 last_hb = 0.0
+                rate_requested = False
                 while True:
                     now = time.time()
                     if now - last_hb > 1.0:
@@ -45,6 +48,10 @@ class MavlinkTelemetry:
                         self._handle(msg)
                         with self._lock:
                             self._connected = True
+                        if not rate_requested and msg.get_type() == "HEARTBEAT" \
+                                and msg.get_srcComponent() == 1:
+                            self._request_attitude_rate(msg.get_srcSystem(), msg.get_srcComponent())
+                            rate_requested = True
             except Exception:
                 with self._lock:
                     self._connected = False
@@ -56,6 +63,18 @@ class MavlinkTelemetry:
                 mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER,
                 mavutil.mavlink.MAV_AUTOPILOT_INVALID,
                 0, 0, 0,
+            )
+
+    def _request_attitude_rate(self, sysid, compid):
+        """MAV_CMD_SET_MESSAGE_INTERVAL for ATTITUDE — pushes it well past ArduPilot's
+        default ~4Hz stream rate so the Pilot view HUD doesn't look choppy."""
+        with self._send_lock:
+            self.master.mav.command_long_send(
+                sysid, compid,
+                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE,
+                int(1e6 / ATTITUDE_HZ),
+                0, 0, 0, 0, 0,
             )
 
     def _handle(self, msg):
