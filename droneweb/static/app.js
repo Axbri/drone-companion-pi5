@@ -147,10 +147,10 @@ function drawHud(canvasId, roll, pitch, heading) {
   // ---- pitch ladder, rotated with roll around the reticle ----
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate((-roll * Math.PI) / 180);
+  ctx.rotate((roll * Math.PI) / 180);
   const pxPerDeg = scale * 0.012, halfW = scale * 0.15;
   for (let deg = -90; deg <= 90; deg += 10) {
-    const y = (deg - pitch) * pxPerDeg;
+    const y = (pitch - deg) * pxPerDeg;
     if (Math.abs(y) > scale * 0.42) continue;
     const major = deg % 30 === 0;
     const hw = deg === 0 ? halfW * 1.7 : (major ? halfW : halfW * 0.5);
@@ -183,7 +183,7 @@ function drawHud(canvasId, roll, pitch, heading) {
     ctx.lineTo(cx + r2 * Math.cos(a), arcY + r2 * Math.sin(a));
     ctx.stroke();
   });
-  const pa = Math.PI * 1.5 + (roll * Math.PI) / 180;
+  const pa = Math.PI * 1.5 - (roll * Math.PI) / 180;
   const tipR = arcR + scale * 0.015, baseR = arcR - scale * 0.01, spread = 0.05;
   ctx.beginPath();
   ctx.moveTo(cx + tipR * Math.cos(pa), arcY + tipR * Math.sin(pa));
