@@ -123,7 +123,21 @@ function drawHud(canvasId, roll, pitch, heading) {
 
   const ctx = c.getContext("2d");
   ctx.clearRect(0, 0, w, h);
-  const cx = w / 2, cy = h / 2, scale = Math.min(w, h);
+
+  // Confine the HUD to the video's actual displayed box: the <img> uses
+  // object-fit:contain, so it's letterboxed inside .video-wrap whenever the
+  // frame's aspect ratio doesn't match the container's. Match that box (via the
+  // image's natural size) so the HUD scales and keeps the video's aspect ratio
+  // instead of stretching across the full (possibly letterboxed) canvas.
+  const vid = $("video-hq");
+  const iw = vid && vid.naturalWidth, ih = vid && vid.naturalHeight;
+  let vw = w, vh = h, vx = 0, vy = 0;
+  if (iw && ih) {
+    const s = Math.min(w / iw, h / ih);
+    vw = iw * s; vh = ih * s;
+    vx = (w - vw) / 2; vy = (h - vh) / 2;
+  }
+  const cx = vx + vw / 2, cy = vy + vh / 2, scale = Math.min(vw, vh);
   ctx.strokeStyle = "#ffcc00"; ctx.fillStyle = "#ffcc00";
   ctx.lineWidth = Math.max(1.5, scale * 0.0025);
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -155,8 +169,8 @@ function drawHud(canvasId, roll, pitch, heading) {
   }
   ctx.restore();
 
-  // ---- bank (roll) arc, fixed, top center — ticks fixed, pointer rotates ----
-  const arcY = cy - scale * 0.30, arcR = scale * 0.13;
+  // ---- bank (roll) arc, fixed, upper-center — ticks fixed, pointer rotates ----
+  const arcY = cy - scale * 0.13, arcR = scale * 0.20;
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, arcY, arcR, Math.PI * 1.22, Math.PI * 1.78);
@@ -179,14 +193,14 @@ function drawHud(canvasId, roll, pitch, heading) {
   ctx.fill();
   ctx.restore();
 
-  // ---- heading tape, fixed, near top edge ----
-  const tapeY = scale * 0.06, pxPerHdgDeg = scale * 0.011;
+  // ---- heading tape, fixed, near top edge of the video content box ----
+  const tapeY = vy + scale * 0.06, pxPerHdgDeg = scale * 0.011;
   ctx.save();
-  ctx.beginPath(); ctx.moveTo(0, tapeY); ctx.lineTo(w, tapeY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx, tapeY); ctx.lineTo(vx + vw, tapeY); ctx.stroke();
   const start = Math.floor((heading - 60) / 10) * 10;
   for (let hv = start; hv <= heading + 60; hv += 10) {
     const x = cx + (hv - heading) * pxPerHdgDeg;
-    if (x < 0 || x > w) continue;
+    if (x < vx || x > vx + vw) continue;
     const hd = ((hv % 360) + 360) % 360;
     const major = hd % 30 === 0;
     ctx.beginPath();
