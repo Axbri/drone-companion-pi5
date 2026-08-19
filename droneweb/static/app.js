@@ -708,6 +708,24 @@ function drawMission(d) {
   $("map-wp-count").textContent = items.length;
   $("map-fence-count").textContent = missionData.fence.length;
   $("map-rally-count").textContent = missionData.rally.length;
+  renderWpTable();
+}
+
+function renderWpTable() {
+  const tbody = $("wp-table-body");
+  const items = missionData.items;
+  if (!items.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="wp-table-empty">No mission read</td></tr>';
+    return;
+  }
+  tbody.innerHTML = items.map((w) => {
+    const home = w.seq === 0;
+    const alt = w.alt != null ? `${w.alt.toFixed(1)} ${w.alt_label || ""}` : "–";
+    return `<tr class="${home ? "wp-home-row" : ""}">
+        <td>${home ? "Home" : w.seq}</td><td>${alt}</td>
+        <td>${w.lat.toFixed(6)}</td><td>${w.lon.toFixed(6)}</td>
+      </tr>`;
+  }).join("");
 }
 
 $("map-read-mission").addEventListener("click", () => {
@@ -721,6 +739,7 @@ $("map-clear").addEventListener("click", () => {          // clear everything dr
   $("map-wp-count").textContent = "–";
   $("map-fence-count").textContent = "–";
   $("map-rally-count").textContent = "–";
+  renderWpTable();
 });
 
 async function pollMission() {

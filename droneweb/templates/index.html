@@ -182,36 +182,48 @@
 
       <div class="splitter" id="splitter-map" title="Drag to resize"></div>
 
-      <aside class="panel">
-        <div class="card">
-          <h2>Map layers</h2>
-          <div class="row"><span>Base layer</span>
-            <select id="map-basemap">
-              <option value="map">Map</option>
-              <option value="sat">Satellite</option>
-              <option value="topo">Topo</option>
-              <option value="cycl">Trails</option>
-            </select>
+      <div class="map-side">
+        <aside class="panel">
+          <div class="card">
+            <h2>Map layers</h2>
+            <div class="row"><span>Base layer</span>
+              <select id="map-basemap">
+                <option value="map">Map</option>
+                <option value="sat">Satellite</option>
+                <option value="topo">Topo</option>
+                <option value="cycl">Trails</option>
+              </select>
+            </div>
+            <label class="row chk"><span>Follow drone</span><input type="checkbox" id="map-follow" checked></label>
+            <label class="row chk"><span>Seamarks</span><input type="checkbox" id="map-seamarks"></label>
+            <label class="row chk"><span>Relief</span><input type="checkbox" id="map-relief"></label>
+            <label class="row chk"><span>Fence</span><input type="checkbox" id="map-lyr-fence" checked></label>
+            <label class="row chk"><span>Rally</span><input type="checkbox" id="map-lyr-rally" checked></label>
+            <label class="row chk"><span>Distance rings</span><input type="checkbox" id="map-lyr-rings"></label>
           </div>
-          <label class="row chk"><span>Follow drone</span><input type="checkbox" id="map-follow" checked></label>
-          <label class="row chk"><span>Seamarks</span><input type="checkbox" id="map-seamarks"></label>
-          <label class="row chk"><span>Relief</span><input type="checkbox" id="map-relief"></label>
-          <label class="row chk"><span>Fence</span><input type="checkbox" id="map-lyr-fence" checked></label>
-          <label class="row chk"><span>Rally</span><input type="checkbox" id="map-lyr-rally" checked></label>
-          <label class="row chk"><span>Distance rings</span><input type="checkbox" id="map-lyr-rings"></label>
-        </div>
 
-        <div class="card">
-          <h2>Mission</h2>
-          <button id="map-read-mission" class="btn-arm">Read mission</button>
-          <button id="map-clear" class="btn-rec">Clear map</button>
-          <div class="row"><span>Waypoints</span><b><span id="map-wp-count">–</span></b></div>
-          <div class="row"><span>Fence points</span><b><span id="map-fence-count">–</span></b></div>
-          <div class="row"><span>Rally points</span><b><span id="map-rally-count">–</span></b></div>
-          <div class="hint-sm">Reads mission → fence → rally from the FC (chained). Clearing the map
-            only clears what's drawn here — it doesn't change anything on the vehicle.</div>
+          <div class="card">
+            <h2>Mission</h2>
+            <button id="map-read-mission" class="btn-arm">Read mission</button>
+            <button id="map-clear" class="btn-rec">Clear map</button>
+            <div class="row"><span>Waypoints</span><b><span id="map-wp-count">–</span></b></div>
+            <div class="row"><span>Fence points</span><b><span id="map-fence-count">–</span></b></div>
+            <div class="row"><span>Rally points</span><b><span id="map-rally-count">–</span></b></div>
+            <div class="hint-sm">Reads mission → fence → rally from the FC (chained). Clearing the map
+              only clears what's drawn here — it doesn't change anything on the vehicle.</div>
+          </div>
+        </aside>
+
+        <div class="wp-table-wrap">
+          <h2>Waypoints</h2>
+          <div class="table-scroll">
+            <table id="wp-table">
+              <thead><tr><th>WP</th><th>Alt (m)</th><th>Lat</th><th>Lon</th></tr></thead>
+              <tbody id="wp-table-body"><tr><td colspan="4" class="wp-table-empty">No mission read</td></tr></tbody>
+            </table>
+          </div>
         </div>
-      </aside>
+      </div>
     </section>
 
     <section class="view view-single" id="view-system" data-view="system">

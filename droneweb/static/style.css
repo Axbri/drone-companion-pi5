@@ -100,7 +100,7 @@ main {
 }
 .splitter:hover, .view.dragging .splitter { background: var(--accent); }
 .view.dragging { cursor: col-resize; user-select: none; }
-.view.dragging .video-wrap, .view.dragging .map-wrap, .view.dragging .panel { pointer-events: none; }
+.view.dragging .video-wrap, .view.dragging .map-wrap, .view.dragging .panel, .view.dragging .map-side { pointer-events: none; }
 
 .video-wrap {
   position: relative;
@@ -168,6 +168,56 @@ main {
   font-size: 10px;
 }
 .wp-marker.rally { background: #f59e0b; color: #3a2600; border-color: #8a5a00; }
+
+.map-side {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-left: 1px solid var(--line);
+  overflow: hidden;
+}
+.map-side > .panel {
+  flex: 0 0 50%;
+  min-height: 0;
+  border-left: 0;
+  border-bottom: 1px solid var(--line);
+}
+.wp-table-wrap {
+  flex: 0 0 50%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.wp-table-wrap h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+.table-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+#wp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#wp-table th, #wp-table td {
+  padding: 4px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+#wp-table th:first-child, #wp-table td:first-child { text-align: left; }
+#wp-table thead th {
+  color: var(--muted);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+#wp-table tbody tr:hover { background: var(--card); }
+#wp-table .wp-table-empty { text-align: center; color: var(--muted); padding: 12px 8px; }
+#wp-table .wp-home-row td { color: var(--good); }
 
 .panel {
   background: var(--panel);
@@ -274,4 +324,5 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
   .view { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
   .splitter { display: none; }
   .panel { column-width: 150px; border-left: 0; border-top: 1px solid var(--line); }
+  .map-side { border-left: 0; border-top: 1px solid var(--line); }
 }

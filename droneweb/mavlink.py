@@ -21,6 +21,7 @@ ATTITUDE_HZ = 20   # HUD smoothness — ArduPilot's default ATTITUDE stream rate
 FC_SYS, FC_COMP = 1, 1          # ArduPilot FC:s standard sysid/compid
 MT_MISSION, MT_FENCE, MT_RALLY = 0, 1, 2
 GLOBAL_FRAMES = {0, 3, 5, 6, 10, 11}   # MAV_FRAME_* globala varianter (x=lat*1e7, y=lon*1e7)
+FRAME_ALT_LABEL = {0: "AMSL", 3: "rel", 5: "rel", 6: "rel", 10: "terrain", 11: "terrain"}
 MISSION_DL_RETRY_S = 2.0
 MISSION_DL_MAX_TRIES = 6
 
@@ -243,7 +244,10 @@ class MavlinkTelemetry:
                 if it.command == mavutil.mavlink.MAV_CMD_DO_JUMP:   # 177: inga koord., param1 = mål
                     jumps.append({"seq": s, "target": int(it.param1), "repeat": int(it.param2)})
                 elif it.frame in GLOBAL_FRAMES and (it.x or it.y):
-                    items.append({"seq": s, "lat": it.x / 1e7, "lon": it.y / 1e7, "cmd": it.command})
+                    items.append({"seq": s, "lat": it.x / 1e7, "lon": it.y / 1e7,
+                                  "alt": round(it.z, 1),
+                                  "alt_label": FRAME_ALT_LABEL.get(it.frame, "f%d" % it.frame),
+                                  "cmd": it.command})
             with self._lock:
                 self._mission["items"] = items
                 self._mission["jumps"] = jumps
