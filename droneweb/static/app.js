@@ -170,7 +170,7 @@ function drawHud(canvasId, roll, pitch, heading) {
   ctx.restore();
 
   // ---- bank (roll) arc, fixed, upper-center — ticks fixed, pointer rotates ----
-  const arcY = cy - scale * 0.13, arcR = scale * 0.20;
+  const arcY = cy - scale * 0.09, arcR = scale * 0.24;
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, arcY, arcR, Math.PI * 1.22, Math.PI * 1.78);
@@ -194,7 +194,7 @@ function drawHud(canvasId, roll, pitch, heading) {
   ctx.restore();
 
   // ---- heading tape, fixed, near top edge of the video content box ----
-  const tapeY = vy + scale * 0.06, pxPerHdgDeg = scale * 0.011;
+  const tapeY = vy + scale * 0.08, pxPerHdgDeg = scale * 0.011;
   ctx.save();
   ctx.beginPath(); ctx.moveTo(vx, tapeY); ctx.lineTo(vx + vw, tapeY); ctx.stroke();
   const start = Math.floor((heading - 60) / 10) * 10;
