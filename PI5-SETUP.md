@@ -130,10 +130,13 @@ Confirm the drone reaches `homebase:2101` over the tailnet.
 at 40Hz; was set high for the old Pi 3A+), `RNGFND1_TYPE=10/ORIENT=25`,
 GPS1_TYPE=25 (UM982), `SERIALx` for the Pi link @921600. Backup: `cube-full-params-*.param` (stale —
 predates the Pi 5 migration params above; re-export before trusting it).
-Precland tuning is unresolved (latency-driven tilt-coupling) — the Pi 5 latency drop + Kalman filter +
-matched PLND_LAG is the current fix attempt; re-fly a supervised LAND from 3 m and analyze the
-recording (`ox/oy` vs t).
+Precland tuning: **resolved 2026-08-20** — root cause was a double camera→body rotation (our own
+transform duplicating one ArduPilot already does internally for BODY_FRD `LANDING_TARGET`), not
+latency. Fixed in `precland.py` (see `PRECISION-LANDING.md` Flygtest #3/#4). Verified over many
+LAND and RTL landings at full styrskala=1.0 — fast, precise correction, no overshoot.
 
 ## Finish
-Once verified in flight: rename `dronepi5` → `dronepi` (hostnamectl + Tailscale) and retire the Pi 3A+.
+**Done (2026-08-20):** flight-verified (many LAND/RTL landings, see precland section above) — the
+**old Pi 3A+ is retired**, powered off, fully replaced by the Pi 5. Hostname/Tailscale rename
+(`dronepi5` → `dronepi`) not done yet — still running as `dronepi5`.
 Deploy path on the Pi: `/home/axel/droneweb/`. Restart after edits: `sudo systemctl restart droneweb`.

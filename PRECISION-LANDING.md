@@ -4,9 +4,10 @@ Tvåfas-visuell precisionslandning inbyggd i **droneweb**: den nedåtriktade IMX
 landningsplattan, Pi:n skickar `LANDING_TARGET` till ArduPilot, och bildanalys-grafiken visas i
 webbgränssnittet. Bygger på Steg 1 ([`WEB-INTERFACE.md`](WEB-INTERFACE.md)).
 
-> **Status:** mjukvaran är byggd och rök-testad på Pi:n (detektering, faslogik, `LANDING_TARGET`,
-> annoterad video, web-panel). **Kvar innan flygtest:** skriv ut plattan, koppla TF-Luna (I2C),
-> montera kameran nedåt, sätt `PLND_*`-params, och kör test-stegen nedan.
+> **Status (2026-08-20):** flygverifierad, fungerar bra. Snabb och exakt korrektion så fort
+> drönaren kommer ner på rätt höjd och ser plattan, ingen översläng, styrskala=1.0. Verifierat
+> med många landningar i både LAND- och RTL-läge. Se Flygtest #3 nedan för grundorsak/fix och
+> Flygtest #4 för verifieringsflygningen.
 
 ## Faser (färg → ArUco → RTK)
 
@@ -222,9 +223,24 @@ i efterhand mot denna hypotes).
 ingen egen kropps-transform. `image_to_body()` borttagen (ersatt med förklarande kommentar).
 `PLND_YAW_ALIGN` lämnas på 0 (bänktestat: ingen fysisk vridning att kompensera för).
 
-**Ej flygtestad ännu.** Nästa steg enligt test-stegen ovan: **hovring ~3 m, PRECLAND armerat,
-INGEN LAND** — flytta/styr in mot plattan från vänster och bekräfta att drönaren nu lutar mot
-vänster (inte framåt/bakåt) innan nästa landningsförsök. Höj styrskalan gradvis mot 1,0 efter det.
+## Flygtest #4 — verifiering av dubbel-rotations-fixen: fungerar (2026-08-20)
+
+Många landningar, både **LAND**- och **RTL**-läge, styrskala=1,0 (full korrektion, ingen mildring).
+Snabb och exakt korrektion så fort drönaren kommer ner på rätt höjd och ser plattan — ingen
+översläng alls.
+
+Två inspelningar analyserade i detalj:
+- **RTL** (`rec_20260820_002545.csv`): nedstigning 7,83 m → 0,47 m på ~13 s, ARUCO-fasens
+  offset-magnitud max **0,22** (medel 0,10). Ren övergång till RTK-HOLD exakt vid 0,47 m AGL,
+  ingen enda gör-om-cykel.
+- **LAND** (`rec_20260820_001008.csv`): nedstigning 3,48 m → 0,52 m på ~9 s, offset max **0,62**
+  (medel 0,17) — lite mer rörelse men fortfarande långt under den gamla måltapp-zonen. Viss
+  fas-flimmer ARUCO↔RTK-HOLD precis vid 0,5 m-tröskeln under sista inbromsningen (normalt,
+  inte samma sak som `PLND_RET_MAX`-gör-om).
+
+Jämför med Flygtest #2 (2026-08-16) där offset regelbundet låg **0,8–0,98** precis innan målet
+tappades ur bild och drönaren klättrade för ett nytt försök. Ingen sådan cykel syns i något av
+dagens klipp — dubbel-rotations-fixen (Flygtest #3) var grundorsaken, inte bara latensen.
 
 ## Uppskjutet
 
