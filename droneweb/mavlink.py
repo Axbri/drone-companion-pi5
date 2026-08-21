@@ -287,6 +287,24 @@ class MavlinkTelemetry:
                 0.0, 0.0,                 # size_x, size_y
             )
 
+    def send_condition_yaw(self, heading_deg, rate_degs):
+        """MAV_CMD_CONDITION_YAW: sätt auto_yaw-mål (absolut heading, grader, kortaste
+        vägen) med given vridhastighet (grader/s). ArduPilots LAND-läge (även med
+        precision landing aktiv) läser auto_yaw.get_heading() varje styrcykel oavsett
+        pilot-input och rampar dit kontinuerligt själv — stör inte position/höjd-
+        styrningen, och kräver inte omsändning för att fortsätta vrida."""
+        if self.master is None:
+            return
+        with self._send_lock:
+            self.master.mav.command_long_send(
+                FC_SYS, FC_COMP,
+                mavutil.mavlink.MAV_CMD_CONDITION_YAW, 0,
+                float(heading_deg) % 360.0, float(rate_degs),
+                0,   # param3: riktning, 0 = kortaste vägen
+                0,   # param4: 0 = absolut heading (inte relativ)
+                0, 0, 0,
+            )
+
     def send_distance_sensor(self, cm, min_cm=10, max_cm=800):
         """Relä TF-Luna AGL till FC (nedåtriktad laser)."""
         if self.master is None:

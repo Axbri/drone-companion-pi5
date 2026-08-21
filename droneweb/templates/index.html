@@ -138,6 +138,23 @@
             Adjust live. Logged in the CSV.</div>
         </div>
 
+        <div class="card" id="yaw-card">
+          <h2>Yaw alignment</h2>
+          <label class="row chk">
+            <span>Rotate to face marker</span>
+            <input type="checkbox" id="yaw-enabled">
+          </label>
+          <div class="row"><span>Yaw error</span><b><span id="yaw-err">–</span> deg</b></div>
+          <div class="slider-row">
+            <div class="slider-lbl"><span>Turn rate</span><b><span id="yaw-rate-val">30</span></b> deg/s</div>
+            <input type="range" id="yaw-rate" min="5" max="90" step="5" value="30">
+          </div>
+          <div class="hint-sm">Yaws the drone during descent so the nose stays in the same
+            direction relative to the marker (the drawn arrow points up), without stopping
+            the descent. Only active on ArUco (close range). Off = unchanged behavior.
+            Verify the rotation direction on the bench before flying.</div>
+        </div>
+
         <div class="card" id="exposure-card">
           <h2>Exposure (camera)</h2>
           <label class="row chk">

@@ -246,6 +246,16 @@ def api_landscale():
     return jsonify({"cmd_scale": pc.set_cmd_scale(want.get("scale", 1.0))})
 
 
+@app.route("/api/yawalign", methods=["POST"])
+def api_yawalign():
+    want = request.get_json(force=True, silent=True) or {}
+    pc = _get_precland()
+    return jsonify(pc.set_yaw_align(
+        enabled=want.get("enabled"),
+        rate_degs=want.get("rate_degs"),
+    ))
+
+
 @app.route("/api/record", methods=["POST"])
 def api_record():
     want = request.get_json(force=True, silent=True) or {}

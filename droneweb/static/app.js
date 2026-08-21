@@ -283,6 +283,8 @@ async function pollPrecland() {
     exposureCtl.seed(p.exposure);
     renderCalib(p.calib);
     seedScale(p.cmd_scale);
+    seedYaw(p.yaw_align);
+    $("yaw-err").textContent = p.yaw_err_deg != null ? p.yaw_err_deg : "–";
   } catch (e) {}
 }
 
@@ -312,6 +314,37 @@ scaleEl.addEventListener("input", () => {
   }, 120);
 });
 reflectScale();
+
+// ---- yaw alignment (rotate to face marker during descent) ----------------
+const yawEnabledEl = $("yaw-enabled"), yawRateEl = $("yaw-rate");
+let yawSeeded = false, yawTimer = null;
+
+function reflectYaw() {
+  $("yaw-rate-val").textContent = yawRateEl.value;
+}
+
+function sendYaw() {
+  fetch("/api/yawalign", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: yawEnabledEl.checked, rate_degs: Number(yawRateEl.value) }),
+  }).catch(() => {});
+}
+
+function seedYaw(y) {
+  if (!y || yawSeeded) return;
+  yawSeeded = true;
+  yawEnabledEl.checked = !!y.enabled;
+  yawRateEl.value = y.rate_degs;
+  reflectYaw();
+}
+
+yawEnabledEl.addEventListener("change", sendYaw);
+yawRateEl.addEventListener("input", () => {
+  reflectYaw();
+  clearTimeout(yawTimer);
+  yawTimer = setTimeout(sendYaw, 120);
+});
+reflectYaw();
 
 function renderCalib(c) {
   $("cal-px").textContent = c && c.px != null ? c.px : "–";

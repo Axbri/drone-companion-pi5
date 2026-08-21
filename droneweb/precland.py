@@ -88,6 +88,24 @@ class Target:
         p = self.corners
         return sum(math.hypot(*(p[(i + 1) % 4] - p[i])) for i in range(4)) / 4.0
 
+    def yaw_error_rad(self):
+        """Vinkelfel (rad) mellan markörens tryckta "upp" (samma vektor som
+        riktningspilen i annotate()) och bildens "upp" (=nosen, se PLND_YAW_ALIGN-
+        kommentaren nedan). 0 = pilen pekar rakt upp. Positivt = pilen lutar mot
+        höger i bilden. Bara giltigt för ArUco (kräver corners)."""
+        if self.corners is None:
+            return None
+        up = _marker_up_vector(self.corners)
+        return math.atan2(up[0], -up[1])
+
+
+def _marker_up_vector(corners):
+    """Markörens tryckta "upp" i bildkoordinater: mitt på topp-kanten minus mitt på
+    botten-kanten. corners[0..3] är medsols f.o.m. markörens tryckta topp-vänster-
+    hörn, så vektorn följer markörens tryckta orientering när den roterar i bild."""
+    p = corners
+    return ((p[0] + p[1]) - (p[2] + p[3])) / 2.0
+
 
 class PrecLandDetector:
     def __init__(self):
@@ -137,13 +155,9 @@ class PrecLandDetector:
                 cv2.circle(bgr, (u, v), int(target.radius), col, 2)
             if target.source == "aruco" and target.corners is not None:
                 cv2.polylines(bgr, [target.corners.astype(np.int32)], True, col, 2)
-                # Riktningspil: markörens "upp" (mitt på topp-kanten minus mitt på
-                # botten-kanten, corners[0..3] = medsols f.o.m. markörens tryckta
-                # topp-vänster-hörn, så vektorn följer markörens tryckta orientering
-                # när den roterar i bild). Bara en visuell indikator nu — underlag
-                # för framtida gir-inriktning av drönaren mot markören vid landning.
-                p = target.corners
-                up = ((p[0] + p[1]) - (p[2] + p[3])) / 2.0
+                # Riktningspil: markörens tryckta "upp" (se _marker_up_vector).
+                # Samma vektor används av Target.yaw_error_rad() för gir-inriktning.
+                up = _marker_up_vector(target.corners)
                 tip = (u + up[0] * 0.7, v + up[1] * 0.7)
                 cv2.arrowedLine(bgr, (u, v), (int(round(tip[0])), int(round(tip[1]))),
                                 col, 2, tipLength=0.35)
@@ -181,10 +195,30 @@ class PrecLandDetector:
 # PLND_YAW_ALIGN ska vara 0 (bänktestat: kameran är monterad exakt som
 # ArduPilot antar, bild-topp = nos, ingen fysisk vridning att kompensera för).
 
+# ---- gir-inriktning mot markören (CONDITION_YAW) ------------------------
+# ArduPilots LAND-läge (inkl. precision landing) läser auto_yaw.get_heading() varje
+# styrcykel oavsett pilot-input (mode.cpp: land_run_horizontal_control() avslutas
+# alltid med attitude_control->input_thrust_vector_heading(thrust, auto_yaw.get_
+# heading())) — helt frikopplat från position/höjd-styrningen. MAV_CMD_CONDITION_YAW
+# sätter auto_yaw i FIXED-läge mot en absolut heading med given grader/s, och FC:n
+# rampar dit kontinuerligt själv (ingen omsändning krävs för att fortsätta vrida,
+# se autoyaw.cpp) — drönaren vrider alltså SAMTIDIGT som den sjunker, stannar inte
+# upp. Se PrecLandController._control_tick / mavlink.send_condition_yaw.
+#
+# Bänktestat 2026-08-20 (utan props/arm): roterade drönaren för hand ovanför en
+# fast markör och jämförde beräknad mål-heading (yaw + YAW_ERR_SIGN*yaw_err_deg)
+# före/efter — oförändrad (296.8° vs 295.8°) trots 90° handvridning, vilket
+# bekräftar tecknet (rätt tecken → mål-heading oberoende av dronens aktuella
+# riktning; fel tecken hade gett ~dubbla, motsatta utslaget). YAW_ERR_SIGN=1
+# bekräftat korrekt för denna kameramontering. Verklig flygrotation (med props)
+# EJ testad än — se PRECISION-LANDING.md för flygtestplan.
+YAW_ERR_SIGN = 1
+
 
 REC_DIR = "/home/axel/recordings"
 CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
-              "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent,scale\n")
+              "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent,scale,"
+              "yaw_err_deg,yaw_cmd_deg,yaw_align\n")
 
 
 def _f(v, nd=3):
@@ -210,6 +244,11 @@ class PrecLandController:
     RTK_AGL = 0.5         # m — under detta: sluta skicka, RTK håller x/y
     _Q_MAX = 8            # writer-köns tak → drop-oldest (håller RAM nere på Pi 3A+)
 
+    YAW_RATE_DEFAULT = 30.0        # deg/s, live-justerbar i webben
+    YAW_RATE_MIN, YAW_RATE_MAX = 5.0, 90.0
+    YAW_CMD_HZ = 4                 # CONDITION_YAW skickas mycket glesare än LANDING_TARGET;
+                                    # auto_yaw rampar själv kontinuerligt mellan uppdateringarna
+
     def __init__(self, cam, tel, rangefinder=None):
         self.cam, self.tel, self.rf = cam, tel, rangefinder
         self.det = PrecLandDetector()
@@ -223,13 +262,17 @@ class PrecLandController:
         self._exposure_us = CV_EXPOSURE_US
         self._gain = CV_GAIN
         self._cmd_scale = CMD_SCALE_DEFAULT   # styrskala för LANDING_TARGET (live)
+        self._yaw_align = False               # av = beter sig precis som innan denna funktion
+        self._yaw_rate = self.YAW_RATE_DEFAULT
+        self._last_yaw_tx = 0.0
         self._lat_ms = None                   # Pi-latens (kamera-fångst → skick), EWMA
         self._loop_hz = None                  # verklig loop-takt, EWMA
         self._last_tick = None
         self._st_lock = threading.Lock()
         self._status = {"phase": None, "source": None, "agl": None,
                         "offset": None, "tx": 0, "sent": False, "rec_file": None,
-                        "calib": None, "latency_ms": None, "loop_hz": None}
+                        "calib": None, "latency_ms": None, "loop_hz": None,
+                        "yaw_err_deg": None}
 
     @property
     def armed(self):
@@ -264,6 +307,18 @@ class PrecLandController:
         self._cmd_scale = float(max(0.1, min(1.0, s)))
         return round(self._cmd_scale, 2)
 
+    def yaw_align_status(self):
+        return {"enabled": self._yaw_align, "rate_degs": round(self._yaw_rate, 1)}
+
+    def set_yaw_align(self, enabled=None, rate_degs=None):
+        """Av/på för girinriktning mot markören + vridhastighet (grader/s). Live.
+        Av = ingen CONDITION_YAW skickas alls, dvs. exakt som innan denna funktion."""
+        if enabled is not None:
+            self._yaw_align = bool(enabled)
+        if rate_degs is not None:
+            self._yaw_rate = float(max(self.YAW_RATE_MIN, min(self.YAW_RATE_MAX, rate_degs)))
+        return self.yaw_align_status()
+
     def set_exposure(self, auto=None, exposure_us=None, gain=None):
         """Ställ CV-exponering live från webben (fältjustering). Klämmer värden och
         applicerar direkt om CV-loopen kör; annars gäller de vid nästa Aktivera."""
@@ -290,6 +345,7 @@ class PrecLandController:
         s["recording"] = self._recording
         s["exposure"] = self.exposure_status()
         s["cmd_scale"] = round(self._cmd_scale, 2)
+        s["yaw_align"] = self.yaw_align_status()
         rf = self.rf.status() if self.rf else {"ok": False}
         s["rangefinder_ok"] = rf.get("ok", False)
         return s
@@ -350,7 +406,7 @@ class PrecLandController:
         else:
             target = None
 
-        ax = ay = ox = oy = None
+        ax = ay = ox = oy = yaw_err_deg = yaw_cmd_deg = None
         sent = False
         if target is not None:
             ax, ay = target.angles()
@@ -360,6 +416,22 @@ class PrecLandController:
                 self.tel.send_landing_target(ax * k, ay * k, agl if agl else 0.0)
                 sent = True
                 self._tx += 1
+            if target.source == "aruco":
+                # Beräknas alltid (även av-slaget) så felet + mål-heading syns i
+                # webben/CSV:n för bänktest av YAW_ERR_SIGN — se kommentaren vid
+                # konstanten ovan. yaw_cmd_deg räknas oberoende av om det faktiskt
+                # skickas (throttlat nedan), så loggen får full 40Hz upplösning.
+                ye = target.yaw_error_rad()
+                if ye is not None:
+                    yaw_err_deg = math.degrees(ye)
+                    cur_yaw = self.tel.snapshot().get("yaw")
+                    if cur_yaw is not None:
+                        yaw_cmd_deg = (cur_yaw + YAW_ERR_SIGN * yaw_err_deg) % 360.0
+                        if self._yaw_align and self._armed and phase == PHASE_ARUCO:
+                            now_yaw = time.time()
+                            if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
+                                self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
+                                self._last_yaw_tx = now_yaw
 
         # kamerakalibrering: implied markavstånd (cm) = agl*tan(vinkel), och uppmätt
         # brännvidd ur ArUco-markörens px-storlek + känd fysisk storlek + agl.
@@ -393,6 +465,7 @@ class PrecLandController:
                 agl=(round(agl, 2) if agl is not None else None),
                 offset=([round(ox, 3), round(oy, 3)] if target else None),
                 tx=self._tx, sent=sent, calib=calib,
+                yaw_err_deg=(round(yaw_err_deg, 1) if yaw_err_deg is not None else None),
                 latency_ms=(round(self._lat_ms, 1) if self._lat_ms else None),
                 loop_hz=(round(self._loop_hz, 1) if self._loop_hz else None),
             )
@@ -401,7 +474,7 @@ class PrecLandController:
         if need_video and bgr is not None:
             self._enqueue((bgr, target, phase, agl, sent, self._armed,
                            self._recording, ox, oy, ax, ay, time.time(),
-                           self.tel.snapshot()))
+                           self.tel.snapshot(), yaw_err_deg, yaw_cmd_deg))
 
     def _decide_phase(self, agl, aruco):
         if agl is None:                       # ingen AGL (t.ex. bänk utan TF-Luna) → detektionsbaserat
@@ -439,7 +512,7 @@ class PrecLandController:
                 if item is None:
                     break
                 (bgr, target, phase, agl, sent, armed, recording,
-                 ox, oy, ax, ay, t, tel) = item
+                 ox, oy, ax, ay, t, tel, yaw_err_deg, yaw_cmd_deg) = item
                 out = self.det.annotate(bgr, target, phase=phase, agl=agl)
                 ok, jpg = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 if ok:
@@ -449,7 +522,7 @@ class PrecLandController:
                         writer, csvf = self._open_recording()
                     writer.write(out)
                     csvf.write(self._row(t, tel, armed, agl, phase, target,
-                                         ox, oy, ax, ay, sent))
+                                         ox, oy, ax, ay, sent, yaw_err_deg, yaw_cmd_deg))
                 elif writer is not None:
                     writer.release(); csvf.close(); writer = csvf = None
         finally:
@@ -458,7 +531,8 @@ class PrecLandController:
             if csvf is not None:
                 csvf.close()
 
-    def _row(self, t, tel, armed, agl, phase, target, ox, oy, ax, ay, sent):
+    def _row(self, t, tel, armed, agl, phase, target, ox, oy, ax, ay, sent,
+             yaw_err_deg, yaw_cmd_deg):
         return ",".join([
             "%.3f" % t, str(tel.get("mode", "")), "1" if armed else "0",
             _f(tel.get("roll")), _f(tel.get("pitch")), _f(tel.get("yaw")), _f(tel.get("heading")),
@@ -467,7 +541,8 @@ class PrecLandController:
             (target.source if target else ""), _f(ox), _f(oy),
             _f(math.degrees(ax) if ax is not None else None),
             _f(math.degrees(ay) if ay is not None else None), "1" if sent else "0",
-            "%.2f" % self._cmd_scale,
+            "%.2f" % self._cmd_scale, _f(yaw_err_deg), _f(yaw_cmd_deg),
+            "1" if self._yaw_align else "0",
         ]) + "\n"
 
 

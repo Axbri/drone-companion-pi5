@@ -97,8 +97,11 @@ in hela flygningen. Sparar synkat i `/home/axel/recordings/`:
 - **Video** `.avi` (MJPEG, 640×480, **med CV-overlay** — markör/cirkel, fas, AGL, offset).
 - **Data** `.csv` — **en rad per videoruta** (ruta N ↔ rad N): `t` (epok-tid, exakt), mode, armed,
   roll, pitch, yaw, heading, alt, **agl** (TF-Luna), batteri (V/%), GPS-fix/sats, fas, mål-källa,
-  offset ox/oy, `angle ax/ay` (grader), `sent` (skickades LANDING_TARGET). CSV:ns `t` är den exakta
-  tidsstämpeln per ruta; video-fps är nominell (~8 Hz på Pi 3A+).
+  offset ox/oy, `angle ax/ay` (grader), `sent` (skickades LANDING_TARGET), `scale`, samt
+  `yaw_err_deg`/`yaw_cmd_deg`/`yaw_align` (girinriktning: markörens vinkelfel, den beräknade
+  mål-headingen (grader, oavsett om den faktiskt skickades) och om girinriktning var på för den
+  raden — se avsnittet om girinriktning nedan). CSV:ns `t` är den exakta tidsstämpeln per ruta;
+  video-fps är nominell (~8 Hz på Pi 3A+).
 
 Ladda ner via **Inspelningar**-panelen (video- + data-länkar) eller `http://dronepi:8080/recordings/<namn>.avi`.
 Radera via ✕ i listan. **Analystips:** plotta CSV (agl vs t = nedstigningsprofil, ox/oy vs t =
@@ -242,7 +245,49 @@ Jämför med Flygtest #2 (2026-08-16) där offset regelbundet låg **0,8–0,98*
 tappades ur bild och drönaren klättrade för ett nytt försök. Ingen sådan cykel syns i något av
 dagens klipp — dubbel-rotations-fixen (Flygtest #3) var grundorsaken, inte bara latensen.
 
+## Girinriktning mot markören — bänktest (2026-08-20)
+
+Ny funktion: drönaren vrider sig (yaw) under nedstigningen så nosen hamnar likadant mot markören
+varje gång (pilen i videon pekar rakt upp), samtidigt som den sjunker — inte stanna-och-vrida. Av/på
++ vridhastighet (grader/s) i webben (precland-panelen).
+
+**Metod:** `MAV_CMD_CONDITION_YAW` (COMMAND_LONG), inte RC-yaw-override. Källkontroll (`mode.cpp`,
+`autoyaw.cpp`) visar att ArduPilots LAND-läge (inkl. precision landing) alltid styr gir via
+`auto_yaw.get_heading()`, oberoende av piloten och av position/höjd-styrningen — CONDITION_YAW sätter
+`auto_yaw` i FIXED-läge mot en absolut heading med given grader/s, och FC:n rampar dit själv
+kontinuerligt. RC-override hade låst ut pilotens gir-spak helt och krävt egen omsändnings-logik;
+CONDITION_YAW gör varken. **OBS:** pilotens gir-spak har ingen effekt alls i LAND-läge (varken av
+eller på för denna funktion) — nödstopp för fel gir-beteende är **lägesbyte**, inte spaken.
+
+**Bänktest (utan props/arm):** samma sorts risk som dubbel-rotations-buggen (Flygtest #3) — kamerans
+bildrotation mot kroppens girriktning var overifierad. Testat i två steg:
+1. Markören roterad för hand under kameran (drönaren still): beräknat `yaw_err_deg` följde
+   markörens rotation korrekt (0°→-1°, +90°→89°, -90°→-93°).
+2. Drönaren roterad för hand ovanför en fast markör (props av, EJ armerad): jämförde beräknad
+   mål-heading (`yaw` + `YAW_ERR_SIGN`×`yaw_err_deg`) före/efter en 90° handvridning — i princip
+   oförändrad (296,8° → 295,8°), vilket bekräftar tecknet (fel tecken hade gett en fördubblad,
+   motsatt förskjutning). `YAW_ERR_SIGN = 1` bekräftat rätt för denna kameramontering.
+
+`yaw_err_deg` och beräknad `yaw_cmd_deg` loggas i CSV:n (full 40Hz-upplösning, oavsett om funktionen
+är på) för efteranalys.
+
+## Flygtest #5 — girinriktning i luften: fungerar (2026-08-20)
+
+Fyra fulla landningar (LAND/LOITER och LOITER/RTL), `yaw_align` på hela flygningen, 8 m → touchdown.
+Alla fyra konvergerade från stort initialt vinkelfel vid ArUco-lock (godtycklig inflygningsriktning)
+till nära noll vid touchdown, utan att nedstigningen pausade:
+
+| Inspelning | Fel vid ArUco-lock | Fel vid touchdown |
+|---|---|---|
+| `rec_20260820_231310` | -91,6° | 0,2° |
+| `rec_20260820_232124` | 113,2° | 0,3° |
+| `rec_20260820_232309` | 147,3° | 0,5° |
+| `rec_20260820_232450` | 180,0° (nosen rakt bakvänd) | -0,5° |
+
+T.ex. `_232124`: AGL 7,91→3,83→0,66→0,14 m medan `yaw` samtidigt svängde 213°→306,5°→309,3° och la sig
+— konvergerar på någon sekund, nedstigningen fortsätter oavbrutet genom hela korrigeringen.
+`YAW_ERR_SIGN=1` bekräftat rätt i verklig flygning, inte bara på bänken.
+
 ## Uppskjutet
 
-- **Yaw-inriktning** (vrida drönaren mot markören) via RC-yaw-override — egen testiteration.
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
