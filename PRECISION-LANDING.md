@@ -20,9 +20,15 @@ nedan för varför.
 
 | Fas | Villkor | Mål-detektor | Skickar |
 |---|---|---|---|
-| **WAIT** | AGL > `aruco_start_agl` | — | inget (letar inte ens) |
+| **WAIT** | AGL > `aruco_start_agl` | ArUco (diagnostik, se nedan) | inget |
 | **ARUCO** | `rtk_agl` ≤ AGL ≤ `aruco_start_agl` (eller AGL okänd) | ArUco `DICT_4X4_50` ID 0 | `LANDING_TARGET` |
-| **RTK-HÅLL** | AGL < `rtk_agl` | — | inget → RTK håller x/y + landar |
+| **RTK-HÅLL** | AGL < `rtk_agl` | ArUco (diagnostik, se nedan) | inget → RTK håller x/y + landar |
+
+**Detektering körs alltid** (2026-08-21), oavsett fas — även i WAIT/RTK-HOLD, för att kunna testa
+räckvidden bortom de aktiva trösklarna (syns markören på högre/lägre höjd än den skulle agera på?).
+Sändning (`LANDING_TARGET`/`CONDITION_YAW`) är strikt grindad på `phase == ARUCO`, oavsett om ett
+mål hittas. Overlayn i videon är **grön** i ARUCO-fasen, **röd** i WAIT/RTK-HOLD — röd = "ser den,
+men skickar inget".
 
 Alla tre trösklar (`aruco_start_agl`, `rtk_agl`, plus `yaw_start_agl` för girinriktningen — se
 nedan) är **live-justerbara i webben** (kortet "Altitude thresholds") för experiment under

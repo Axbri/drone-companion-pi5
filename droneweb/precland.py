@@ -135,7 +135,10 @@ class PrecLandDetector:
                        cv2.MARKER_CROSS, 20, 1)
         if target is not None:
             u, v = int(target.u), int(target.v)
-            col = (0, 255, 0)
+            # Grön = ARUCO-fasen (aktivt styrande). Röd = WAIT/RTK-HOLD — detektering
+            # körs där numera också (räckviddstest), men inget skickas; röd markerar
+            # tydligt att det bara är diagnostik.
+            col = (0, 255, 0) if phase == PHASE_ARUCO else (0, 0, 255)
             if target.corners is not None:
                 cv2.polylines(bgr, [target.corners.astype(np.int32)], True, col, 2)
                 # Riktningspil: markörens tryckta "upp" (se _marker_up_vector).
@@ -147,8 +150,8 @@ class PrecLandDetector:
             cv2.line(bgr, (int(CX), int(CY)), (u, v), col, 2)
             cv2.circle(bgr, (u, v), 4, col, -1)
             ax, ay = target.angles()
-            cv2.putText(bgr, "ARUCO  ax=%.1f ay=%.1f deg" % (
-                math.degrees(ax), math.degrees(ay)),
+            cv2.putText(bgr, "%s  ax=%.1f ay=%.1f deg" % (
+                phase or "ARUCO", math.degrees(ax), math.degrees(ay)),
                 (8, CV_H - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
         hud = []
         if phase:
@@ -222,11 +225,13 @@ def _f(v, nd=3):
 
 class PrecLandController:
     """Kör CV-loopen kontinuerligt från appens start (ingen manuell Arm/Disarm
-    längre): väljer fas efter AGL — WAIT (ovanför aruco_start_agl, letar inte alls),
-    ARUCO (detekterar + skickar LANDING_TARGET), RTK-HOLD (under rtk_agl, slutar
-    skicka) — matar en nedskalad live-förhandsvisning (bara när någon tittar), och
-    spelar in synkad video (.avi) + datalogg (.csv) på begäran (oberoende av
-    spårningen, som alltid går). Höjdtrösklarna är live-justerbara, se set_thresholds()."""
+    längre): detekterar ArUco varje ruta OAVSETT fas (räckviddstest — se annotate(),
+    röd overlay utanför ARUCO-fasen), men skickar bara LANDING_TARGET/CONDITION_YAW
+    när fasen faktiskt är ARUCO. Fas väljs efter AGL — WAIT (ovanför aruco_start_agl),
+    ARUCO (rtk_agl..aruco_start_agl), RTK-HOLD (under rtk_agl) — matar en nedskalad
+    live-förhandsvisning (bara när någon tittar), och spelar in synkad video (.avi) +
+    datalogg (.csv) på begäran (oberoende av spårningen, som alltid går). Höjdtrösklarna
+    är live-justerbara, se set_thresholds()."""
 
     RATE_HZ = 40          # kontroll-loopens tak (matchar kamera-FPS). Tung JPEG-encode + inspelning
                           # körs i separat writer-tråd, så detekt+skick av LANDING_TARGET tightas
@@ -392,7 +397,10 @@ class PrecLandController:
         agl = self.rf.agl() if self.rf else None
         phase = self._decide_phase(agl)
 
-        aruco = self.det.detect_aruco(gray) if phase == PHASE_ARUCO else None
+        # Detekterar alltid, oavsett fas (även WAIT/RTK-HOLD) — för räckviddstest (kan
+        # den se markören högre upp / lägre ner än de aktiva trösklarna?). Sändning är
+        # explicit grindad på phase == PHASE_ARUCO nedan, INTE på om ett mål hittades.
+        aruco = self.det.detect_aruco(gray)
         target = aruco
 
         # Gråskala→BGR bara för overlay-färg i förhandsvisning/inspelning (cvtColor
@@ -413,15 +421,15 @@ class PrecLandController:
         if target is not None:
             ax, ay = target.angles()
             ox, oy = target.offset_norm()
-            if phase != PHASE_RTK:
+            if phase == PHASE_ARUCO:
                 k = self._cmd_scale                      # styrskala: mildare korrektion
                 self.tel.send_landing_target(ax * k, ay * k, agl if agl else 0.0)
                 sent = True
                 self._tx += 1
 
-            # Beräknas alltid (även av-slaget) så felet + mål-heading syns i webben/
-            # CSV:n. yaw_cmd_deg räknas oberoende av om det faktiskt skickas
-            # (grindat nedan), så loggen får full upplösning.
+            # Beräknas alltid (även utanför ARUCO-fasen, även av-slaget) så felet +
+            # mål-heading syns i webben/CSV:n som diagnostik. yaw_cmd_deg räknas
+            # oberoende av om det faktiskt skickas (grindat nedan).
             ye = target.yaw_error_rad()
             if ye is not None:
                 yaw_err_deg = math.degrees(ye)
@@ -429,7 +437,8 @@ class PrecLandController:
                 cur_yaw = tel_snap.get("yaw")
                 if cur_yaw is not None:
                     yaw_cmd_deg = (cur_yaw + YAW_ERR_SIGN * yaw_err_deg) % 360.0
-                    if (self._yaw_align and tel_snap.get("mode") in YAW_MODES
+                    if (phase == PHASE_ARUCO and self._yaw_align
+                            and tel_snap.get("mode") in YAW_MODES
                             and agl is not None and agl <= self._yaw_start_agl):
                         now_yaw = time.time()
                         if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
@@ -551,7 +560,7 @@ class PrecLandController:
 
     def _row(self, t, tel, agl, phase, target, ox, oy, ax, ay,
              yaw_err_deg, yaw_cmd_deg):
-        sent = phase != PHASE_RTK and target is not None
+        sent = phase == PHASE_ARUCO and target is not None
         return ",".join([
             "%.3f" % t, str(tel.get("mode", "")), "1",
             _f(tel.get("roll")), _f(tel.get("pitch")), _f(tel.get("yaw")), _f(tel.get("heading")),
