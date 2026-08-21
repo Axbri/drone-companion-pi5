@@ -17,27 +17,18 @@ from flask import (Flask, Response, jsonify, render_template, request,
 from camera import Camera
 from camera_hq import HQCamera
 from mavlink import MavlinkTelemetry
+from precland import PrecLandController
 from rangefinder import RangeFinder
 from rtk import RtkMonitor
 
 app = Flask(__name__)
-cam = Camera()        # imx219 — precland (low-latency CV loop)
+cam = Camera()        # imx219 — spårningskamera (alltid på, se camera.py)
 hq_cam = HQCamera()   # imx477 — Pilot view FPV stream only
 tel = MavlinkTelemetry()
 rf = RangeFinder(tel)   # alltid på: reläar TF-Luna DISTANCE_SENSOR till FC från boot (lätt, ingen cv2)
 rtkmon = RtkMonitor()   # pollar NTRIP-basen + injektorn i bakgrunden
+precland = PrecLandController(cam, tel, rf)   # spårningen kör kontinuerligt från start (Steg 3)
 RECORDINGS_DIR = "/home/axel/recordings"
-
-# precland (cv2) skapas lazy vid första arm → cv2 importeras först då (sparar RAM i Steg 1)
-_precland = None
-
-
-def _get_precland():
-    global _precland
-    if _precland is None:
-        from precland import PrecLandController
-        _precland = PrecLandController(cam, tel, rf)
-    return _precland
 
 _NET_IFACE = "wlan0"
 _net = {"t": time.time(), "rx": None, "tx": None}  # baseline sätts vid första pollen
@@ -203,24 +194,15 @@ def api_wifi():
     return jsonify(_network_status())
 
 
-@app.route("/api/precland", methods=["GET", "POST"])
+@app.route("/api/precland")
 def api_precland():
-    if request.method == "POST":
-        want = request.get_json(force=True, silent=True) or {}
-        pc = _get_precland()
-        pc.arm() if want.get("armed") else pc.disarm()
-    if _precland is None:
-        st = rf.status()
-        return jsonify({"armed": False, "phase": None,
-                        "rangefinder_ok": st["ok"], "agl": st["agl"]})
-    return jsonify(_precland.get_status())
+    return jsonify(precland.get_status())
 
 
 @app.route("/api/exposure", methods=["POST"])
 def api_exposure():
     want = request.get_json(force=True, silent=True) or {}
-    pc = _get_precland()
-    return jsonify(pc.set_exposure(
+    return jsonify(precland.set_exposure(
         auto=want.get("auto"),
         exposure_us=want.get("exposure_us"),
         gain=want.get("gain"),
@@ -242,15 +224,13 @@ def api_exposure_hq():
 @app.route("/api/landscale", methods=["POST"])
 def api_landscale():
     want = request.get_json(force=True, silent=True) or {}
-    pc = _get_precland()
-    return jsonify({"cmd_scale": pc.set_cmd_scale(want.get("scale", 1.0))})
+    return jsonify({"cmd_scale": precland.set_cmd_scale(want.get("scale", 1.0))})
 
 
 @app.route("/api/yawalign", methods=["POST"])
 def api_yawalign():
     want = request.get_json(force=True, silent=True) or {}
-    pc = _get_precland()
-    return jsonify(pc.set_yaw_align(
+    return jsonify(precland.set_yaw_align(
         enabled=want.get("enabled"),
         rate_degs=want.get("rate_degs"),
     ))
@@ -259,9 +239,8 @@ def api_yawalign():
 @app.route("/api/record", methods=["POST"])
 def api_record():
     want = request.get_json(force=True, silent=True) or {}
-    pc = _get_precland()
-    pc.start_recording() if want.get("recording") else pc.stop_recording()
-    return jsonify(pc.get_status())
+    precland.start_recording() if want.get("recording") else precland.stop_recording()
+    return jsonify(precland.get_status())
 
 
 @app.route("/api/recordings")

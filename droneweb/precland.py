@@ -1,12 +1,23 @@
-"""Precisionslandnings-CV för droneweb (Steg 2).
+"""Precisionslandnings-CV för droneweb (Steg 3: alltid-på gråskale-spårning).
 
-Två detektorer på lores 640x480:
-  - ArUco (DICT_4X4_50, ID 0)  -> exakt mål när nära
-  - orange cirkel (HSV)         -> mål från hög höjd
+Änd 2026-08-21: färgdetektering (orange platta, för mål på hög höjd) borttagen.
+Bänktest (1:4-skalad markör, se PRECISION-LANDING.md) visade att ArUco-räckvidden
+var den faktiska begränsningen, inte upplösningen — färgläget gav ingen extra
+räckvidd i praktiken. Upplösningen höjd 640x480 → 1024x768 (Pi 5 har gott om
+marginal jämfört med Pi 3A+ som satte den gamla gränsen) för att utöka ArUco-
+räckvidden istället, med samma geometri: fler px/grad → markören syns på större
+avstånd. Kameran används numera bara gråskala (Y-planet av YUV420) — ingen
+kulör behövs längre utan färgdetektering.
 
-Returnerar målets pixelposition + vilken detektor, och räknar om pixel->vinkel
-(angle_x/angle_y i rad) för LANDING_TARGET. Fas-logik + MAVLink-sändning sker i
-app.py (som har AGL från rangefinder.py och mavlink-anslutningen).
+Systemet kör alltid (ingen manuell Arm/Disarm längre): PrecLandController startar
+sin loop direkt vid konstruktion och går för appens hela livstid. Detta är säkert
+eftersom ArduPilots AC_PrecLand redan bara agerar på LANDING_TARGET i relevanta
+lägen/faser (se kommentaren vid gir-inriktningen nedan för det ena undantaget,
+CONDITION_YAW, som INTE har samma inbyggda spärr och därför läges-grindas här).
+
+Returnerar målets pixelposition, och räknar om pixel->vinkel (angle_x/angle_y i
+rad) för LANDING_TARGET. Fas-logik (ARUCO vs RTK-HOLD) + MAVLink-sändning sker
+i PrecLandController (denna modul); AGL kommer från rangefinder.py.
 
 Modulen är fristående testbar:  python precland.py <bild> [målstorlek_px]
 """
@@ -23,17 +34,9 @@ import numpy as np
 ARUCO_DICT = cv2.aruco.DICT_4X4_50
 ARUCO_ID = 0
 
-# Röd-orange platta i HSV (OpenCV H 0-180). Uppmätt i sol: H≈0, S≈240, V≈214.
-# H ligger nära 0 → hue-wrap → två H-band (nära 0 ELLER nära 180). Hög S/V ger
-# specificitet mot grönt gräs (H~40-80). Kalibrerat 2026-07-30, tunas vid behov.
-ORANGE_H_LO = 12             # matcha H <= 12 ...
-ORANGE_H_HI = 165            # ... ELLER H >= 165 (röd-wrap)
-ORANGE_S_MIN = 130
-ORANGE_V_MIN = 90
-COLOR_MIN_AREA = 80          # px^2, minsta blob (~10 px diameter)
-
-# IMX219 full-FOV vid CV-upplösningen (approx; förfinas med kalibrering)
-CV_W, CV_H = 640, 480
+# IMX219 full-FOV vid CV-upplösningen (approx; förfinas med kalibrering). Höjd från
+# 640x480 2026-08-21 för längre ArUco-räckvidd (Pi 5-marginal) — se modul-docstring.
+CV_W, CV_H = 1024, 768
 HFOV_DEG, VFOV_DEG = 62.2, 48.8
 FX = (CV_W / 2) / math.tan(math.radians(HFOV_DEG) / 2)
 FY = (CV_H / 2) / math.tan(math.radians(VFOV_DEG) / 2)
@@ -45,13 +48,12 @@ CX, CY = CV_W / 2.0, CV_H / 2.0
 MARKER_M = 0.30
 ASSUMED_F = FX               # antagen brännvidd (px) att jämföra uppmätt mot
 
-PHASE_COLOR, PHASE_ARUCO, PHASE_RTK = "COLOR", "ARUCO", "RTK-HOLD"
+PHASE_ARUCO, PHASE_RTK = "ARUCO", "RTK-HOLD"
 
 # Fast exponering under CV-loopen (mot motion blur på höjd — Fynd 1). Kort slutartid
 # fryser rörelsen så rutan blir skarp trots kameravibration; auto-exponering (default)
 # väljer ibland lång slutartid i starkt ljus och smetar ut markören. Tuna 1500-2500 µs
 # efter ljuset; höj gain om för mörkt (men mycket gain = brus som stör detekteringen).
-# Återgår till auto när precland avaktiveras (för normal FPV-video).
 CV_EXPOSURE_US = 2000
 CV_GAIN = 2.0
 
@@ -63,11 +65,11 @@ CMD_SCALE_DEFAULT = 1.0
 
 
 class Target:
-    __slots__ = ("u", "v", "source", "aruco_id", "radius", "corners")
+    __slots__ = ("u", "v", "source", "aruco_id", "corners")
 
-    def __init__(self, u, v, source, aruco_id=None, radius=None, corners=None):
+    def __init__(self, u, v, source, aruco_id=None, corners=None):
         self.u, self.v, self.source = u, v, source
-        self.aruco_id, self.radius, self.corners = aruco_id, radius, corners
+        self.aruco_id, self.corners = aruco_id, corners
 
     def angles(self):
         """(angle_x, angle_y) i rad rel. kameraxeln. +x=höger, +y=nedåt i bilden.
@@ -113,7 +115,6 @@ class PrecLandDetector:
         self._aruco = cv2.aruco.ArucoDetector(
             cv2.aruco.getPredefinedDictionary(ARUCO_DICT), params
         )
-        self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
 
     def detect_aruco(self, gray):
         corners, ids, _ = self._aruco.detectMarkers(gray)
@@ -126,34 +127,16 @@ class PrecLandDetector:
                 return Target(float(u), float(v), "aruco", aruco_id=int(i), corners=pts)
         return None
 
-    def detect_color(self, bgr):
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        m1 = cv2.inRange(hsv, np.array([0, ORANGE_S_MIN, ORANGE_V_MIN], np.uint8),
-                              np.array([ORANGE_H_LO, 255, 255], np.uint8))
-        m2 = cv2.inRange(hsv, np.array([ORANGE_H_HI, ORANGE_S_MIN, ORANGE_V_MIN], np.uint8),
-                              np.array([179, 255, 255], np.uint8))
-        mask = cv2.bitwise_or(m1, m2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self._kernel)
-        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not cnts:
-            return None
-        c = max(cnts, key=cv2.contourArea)
-        if cv2.contourArea(c) < COLOR_MIN_AREA:
-            return None
-        (u, v), r = cv2.minEnclosingCircle(c)
-        return Target(float(u), float(v), "color", radius=float(r))
-
     def annotate(self, bgr, target, phase=None, agl=None):
-        """Ritar bildanalys-grafiken (visas i webben)."""
+        """Ritar bildanalys-grafiken (visas i webben). `bgr` är en gråskalebild
+        konverterad till 3-kanalig (cv2.COLOR_GRAY2BGR) bara för att overlayn ska
+        synas i färg — själva bilden bär ingen kulörinformation."""
         cv2.drawMarker(bgr, (int(CX), int(CY)), (120, 120, 120),
                        cv2.MARKER_CROSS, 20, 1)
         if target is not None:
             u, v = int(target.u), int(target.v)
-            col = (0, 255, 0) if target.source == "aruco" else (0, 165, 255)
-            if target.source == "color" and target.radius:
-                cv2.circle(bgr, (u, v), int(target.radius), col, 2)
-            if target.source == "aruco" and target.corners is not None:
+            col = (0, 255, 0)
+            if target.corners is not None:
                 cv2.polylines(bgr, [target.corners.astype(np.int32)], True, col, 2)
                 # Riktningspil: markörens tryckta "upp" (se _marker_up_vector).
                 # Samma vektor används av Target.yaw_error_rad() för gir-inriktning.
@@ -164,8 +147,8 @@ class PrecLandDetector:
             cv2.line(bgr, (int(CX), int(CY)), (u, v), col, 2)
             cv2.circle(bgr, (u, v), 4, col, -1)
             ax, ay = target.angles()
-            cv2.putText(bgr, "%s  ax=%.1f ay=%.1f deg" % (
-                target.source.upper(), math.degrees(ax), math.degrees(ay)),
+            cv2.putText(bgr, "ARUCO  ax=%.1f ay=%.1f deg" % (
+                math.degrees(ax), math.degrees(ay)),
                 (8, CV_H - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
         hud = []
         if phase:
@@ -208,11 +191,21 @@ class PrecLandDetector:
 # Bänktestat 2026-08-20 (utan props/arm): roterade drönaren för hand ovanför en
 # fast markör och jämförde beräknad mål-heading (yaw + YAW_ERR_SIGN*yaw_err_deg)
 # före/efter — oförändrad (296.8° vs 295.8°) trots 90° handvridning, vilket
-# bekräftar tecknet (rätt tecken → mål-heading oberoende av dronens aktuella
-# riktning; fel tecken hade gett ~dubbla, motsatta utslaget). YAW_ERR_SIGN=1
-# bekräftat korrekt för denna kameramontering. Verklig flygrotation (med props)
-# EJ testad än — se PRECISION-LANDING.md för flygtestplan.
+# bekräftar tecknet. YAW_ERR_SIGN=1 bekräftat korrekt, även flygverifierat
+# (Flygtest #5, PRECISION-LANDING.md) — fyra landningar, alla konvergerade snabbt
+# till <1° fel oavsett startriktning.
+#
+# LÄGES-GRIND (tillagd 2026-08-21, i samband med alltid-på-spårning): till skillnad
+# från LANDING_TARGET — som AC_PrecLand redan själv bara agerar på i relevanta
+# lägen/faser — är CONDITION_YAWs auto_yaw-mål "sticky" och dess beteende vid
+# lägesbyte (t.ex. om ett mål sätts i ett läge som inte konsumerar auto_yaw, och
+# sedan LAND/RTL aktiveras senare) är INTE verifierat. Nu när armering alltid är
+# på (ingen pilot-avsiktlig "arm precis innan landning" längre) skickas
+# CONDITION_YAW bara när flygläget faktiskt är LAND eller RTL (de lägen som
+# flygtestats, Flygtest #4/#5) — inte i t.ex. LOITER/STABILIZE där en tillfällig
+# markör-siktning annars skulle kunna lämna ett kvarglömt gir-mål.
 YAW_ERR_SIGN = 1
+YAW_MODES = ("LAND", "RTL")
 
 
 REC_DIR = "/home/axel/recordings"
@@ -228,41 +221,43 @@ def _f(v, nd=3):
 
 
 class PrecLandController:
-    """Kör CV-loopen när precland är armerat ELLER inspelning pågår: väljer fas
-    efter AGL, detekterar, skickar LANDING_TARGET (bara armerat, utom RTK-fasen),
-    matar annoterad video, och spelar in synkad video (.avi) + datalogg (.csv)."""
+    """Kör CV-loopen kontinuerligt från appens start (ingen manuell Arm/Disarm
+    längre): väljer fas efter AGL (ARUCO eller RTK-HOLD under RTK_AGL), detekterar,
+    skickar LANDING_TARGET (utom i RTK-fasen), matar en nedskalad live-förhandsvisning
+    (bara när någon tittar), och spelar in synkad video (.avi) + datalogg (.csv) på
+    begäran (oberoende av spårningen, som alltid går)."""
 
     RATE_HZ = 40          # kontroll-loopens tak (matchar kamera-FPS). Tung JPEG-encode + inspelning
                           # körs i separat writer-tråd, så detekt+skick av LANDING_TARGET tightas
                           # (mot översläng/latens — Fynd 2). Pi 5, 2026-08-18: 40 Hz stabilt/repeterbart
-                          # (39.7-40.2 Hz uppmätt över 18s). >40 (testat 60/90) gav samma latens men
-                          # ostabil takt (30-53 Hz) pga GIL-delning med app.js webb-pollningen — inte
-                          # kamera/ISP-bunden. 40 är alltså sweetspoten, inte en hård kamera-gräns.
+                          # vid 640x480 — EJ omverifierat vid 1024x768 (2026-08-21), se loop_hz i webben.
     REC_FPS = 8           # AVI-fps-metadata (nominell). Verklig inspelningstakt är writer-begränsad;
                           # CSV:ns t-kolumn är den exakta tiden per ruta (ruta N = CSV-rad N).
-    ARUCO_MAX_AGL = 3.5   # m — under detta föredras ArUco framför färg
     RTK_AGL = 0.5         # m — under detta: sluta skicka, RTK håller x/y
-    _Q_MAX = 8            # writer-köns tak → drop-oldest (håller RAM nere på Pi 3A+)
+    _Q_MAX = 8            # writer-köns tak → drop-oldest (håller RAM nere)
 
-    YAW_RATE_DEFAULT = 30.0        # deg/s, live-justerbar i webben
+    YAW_RATE_DEFAULT = 45.0        # deg/s, live-justerbar i webben
     YAW_RATE_MIN, YAW_RATE_MAX = 5.0, 90.0
     YAW_CMD_HZ = 4                 # CONDITION_YAW skickas mycket glesare än LANDING_TARGET;
                                     # auto_yaw rampar själv kontinuerligt mellan uppdateringarna
 
+    PUSH_HZ = 20                        # live-förhandsvisningens takt (halva RATE_HZ) — sparar bandbredd
+    PUSH_SIZE = (CV_W // 2, CV_H // 2)   # halva upplösningen för samma anledning (512x384)
+
     def __init__(self, cam, tel, rangefinder=None):
         self.cam, self.tel, self.rf = cam, tel, rangefinder
         self.det = PrecLandDetector()
-        self._armed = False
         self._recording = False
-        self._thread = None
         self._tx = 0
-        self._q = None       # writer-kö (skapas i _run)
+        self._q = queue.Queue(maxsize=self._Q_MAX)
+        self._last_push_ts = 0.0
+        self._last_enqueue_ts = 0.0
         # CV-exponering (justeras live från webben för fältjustering)
         self._auto_exposure = False
         self._exposure_us = CV_EXPOSURE_US
         self._gain = CV_GAIN
         self._cmd_scale = CMD_SCALE_DEFAULT   # styrskala för LANDING_TARGET (live)
-        self._yaw_align = False               # av = beter sig precis som innan denna funktion
+        self._yaw_align = True                # av = ingen CONDITION_YAW skickas alls
         self._yaw_rate = self.YAW_RATE_DEFAULT
         self._last_yaw_tx = 0.0
         self._lat_ms = None                   # Pi-latens (kamera-fångst → skick), EWMA
@@ -273,26 +268,12 @@ class PrecLandController:
                         "offset": None, "tx": 0, "sent": False, "rec_file": None,
                         "calib": None, "latency_ms": None, "loop_hz": None,
                         "yaw_err_deg": None}
-
-    @property
-    def armed(self):
-        return self._armed
-
-    def _ensure_thread(self):
-        if self._thread is None or not self._thread.is_alive():
-            self._thread = threading.Thread(target=self._run, daemon=True)
-            self._thread.start()
-
-    def arm(self):
-        self._armed = True
-        self._ensure_thread()
-
-    def disarm(self):
-        self._armed = False
+        self._apply_exposure()
+        threading.Thread(target=self._run, daemon=True).start()
+        threading.Thread(target=self._writer_loop, daemon=True).start()
 
     def _apply_exposure(self):
-        """Skjut aktuellt exponerings-läge till kameran. No-op om kameran ej är
-        igång (camera.set_cv_exposure gardar) → gäller då vid nästa Aktivera."""
+        """Skjut aktuellt exponerings-läge till kameran."""
         if self._auto_exposure:
             self.cam.set_cv_exposure(False)
         else:
@@ -312,7 +293,7 @@ class PrecLandController:
 
     def set_yaw_align(self, enabled=None, rate_degs=None):
         """Av/på för girinriktning mot markören + vridhastighet (grader/s). Live.
-        Av = ingen CONDITION_YAW skickas alls, dvs. exakt som innan denna funktion."""
+        Av = ingen CONDITION_YAW skickas alls."""
         if enabled is not None:
             self._yaw_align = bool(enabled)
         if rate_degs is not None:
@@ -321,7 +302,7 @@ class PrecLandController:
 
     def set_exposure(self, auto=None, exposure_us=None, gain=None):
         """Ställ CV-exponering live från webben (fältjustering). Klämmer värden och
-        applicerar direkt om CV-loopen kör; annars gäller de vid nästa Aktivera."""
+        applicerar direkt."""
         if auto is not None:
             self._auto_exposure = bool(auto)
         if exposure_us is not None:
@@ -333,7 +314,6 @@ class PrecLandController:
 
     def start_recording(self):
         self._recording = True
-        self._ensure_thread()
 
     def stop_recording(self):
         self._recording = False
@@ -341,7 +321,7 @@ class PrecLandController:
     def get_status(self):
         with self._st_lock:
             s = dict(self._status)
-        s["armed"] = self._armed
+        s["armed"] = True             # spårningen är alltid på (Steg 3, 2026-08-21)
         s["recording"] = self._recording
         s["exposure"] = self.exposure_status()
         s["cmd_scale"] = round(self._cmd_scale, 2)
@@ -363,75 +343,65 @@ class PrecLandController:
         return w, c
 
     def _run(self):
-        """Kontroll-loop: bara detektera + skicka LANDING_TARGET (låg latens).
-        Den tunga vyn (annotera + JPEG + inspelning + CSV) lämnas av till en
-        writer-tråd via en bounded kö, så skick-takten inte bromsas av encoden."""
-        with self.cam.cv_hold():
-            self.cam.set_external_source(True)
-            self._apply_exposure()
-            self._last_tick = None
-            self._q = queue.Queue(maxsize=self._Q_MAX)
-            wt = threading.Thread(target=self._writer_loop, daemon=True)
-            wt.start()
-            try:
-                while self._armed or self._recording:
-                    t0 = time.time()
-                    self._control_tick()
-                    time.sleep(max(0.0, 1.0 / self.RATE_HZ - (time.time() - t0)))
-            finally:
-                self._q.put(None)        # signalera writer att flusha + avsluta
-                wt.join(timeout=3)
-                self._q = None
-                self.cam.set_cv_exposure(False)
-                self.cam.set_external_source(False)
+        """Kontroll-loop: detektera + skicka LANDING_TARGET (låg latens), kontinuerligt
+        för appens hela livstid. Den tunga vyn (annotera + JPEG + inspelning + CSV)
+        lämnas av till en writer-tråd via en bounded kö, så skick-takten inte bromsas
+        av encoden."""
+        self._last_tick = None
+        while True:
+            t0 = time.time()
+            self._control_tick()
+            time.sleep(max(0.0, 1.0 / self.RATE_HZ - (time.time() - t0)))
 
     def _control_tick(self):
         """Latens-kritisk: detektera målet och skicka LANDING_TARGET direkt."""
-        yuv, sensor_ts = self.cam.capture_lores_ts()
+        yuv, sensor_ts = self.cam.capture_ts()
         gray = yuv[:CV_H, :CV_W]
         agl = self.rf.agl() if self.rf else None
-        aruco = self.det.detect_aruco(gray)
-        phase = self._decide_phase(agl, aruco)
+        phase = self._decide_phase(agl)
 
-        # BGR behövs bara för färgdetektering (COLOR-fas) och för annoterad video.
-        need_video = self._recording or self.cam.viewers > 0
-        bgr = None
-        if phase == PHASE_COLOR or need_video:
-            bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV420p2BGR)
+        aruco = self.det.detect_aruco(gray) if phase == PHASE_ARUCO else None
+        target = aruco
 
-        if phase == PHASE_ARUCO:
-            target = aruco
-        elif phase == PHASE_COLOR:
-            target = self.det.detect_color(bgr)
-        else:
-            target = None
+        # Gråskala→BGR bara för overlay-färg i förhandsvisning/inspelning (cvtColor
+        # GRAY2BGR är en billig kanal-replikering, inte en riktig färgkonvertering —
+        # ingen kulörinformation finns kvar att konvertera från sedan färgläget togs bort).
+        # Inspelning behöver varje ruta, men ren tittning (utan inspelning) behöver bara
+        # PUSH_HZ-takten (20) — annars görs konvertering+enqueue i onödan vid 40Hz när
+        # bara halva den takten någonsin visas (drog CPU:n till ~80% i test 2026-08-21).
+        now_ve = time.time()
+        need_video = self._recording or (
+            self.cam.viewers > 0 and now_ve - self._last_enqueue_ts >= 1.0 / self.PUSH_HZ)
+        if need_video:
+            self._last_enqueue_ts = now_ve
+        bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR) if need_video else None
 
         ax = ay = ox = oy = yaw_err_deg = yaw_cmd_deg = None
         sent = False
         if target is not None:
             ax, ay = target.angles()
             ox, oy = target.offset_norm()
-            if phase != PHASE_RTK and self._armed:
+            if phase != PHASE_RTK:
                 k = self._cmd_scale                      # styrskala: mildare korrektion
                 self.tel.send_landing_target(ax * k, ay * k, agl if agl else 0.0)
                 sent = True
                 self._tx += 1
-            if target.source == "aruco":
-                # Beräknas alltid (även av-slaget) så felet + mål-heading syns i
-                # webben/CSV:n för bänktest av YAW_ERR_SIGN — se kommentaren vid
-                # konstanten ovan. yaw_cmd_deg räknas oberoende av om det faktiskt
-                # skickas (throttlat nedan), så loggen får full 40Hz upplösning.
-                ye = target.yaw_error_rad()
-                if ye is not None:
-                    yaw_err_deg = math.degrees(ye)
-                    cur_yaw = self.tel.snapshot().get("yaw")
-                    if cur_yaw is not None:
-                        yaw_cmd_deg = (cur_yaw + YAW_ERR_SIGN * yaw_err_deg) % 360.0
-                        if self._yaw_align and self._armed and phase == PHASE_ARUCO:
-                            now_yaw = time.time()
-                            if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
-                                self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
-                                self._last_yaw_tx = now_yaw
+
+            # Beräknas alltid (även av-slaget) så felet + mål-heading syns i webben/
+            # CSV:n. yaw_cmd_deg räknas oberoende av om det faktiskt skickas
+            # (grindat nedan), så loggen får full upplösning.
+            ye = target.yaw_error_rad()
+            if ye is not None:
+                yaw_err_deg = math.degrees(ye)
+                tel_snap = self.tel.snapshot()
+                cur_yaw = tel_snap.get("yaw")
+                if cur_yaw is not None:
+                    yaw_cmd_deg = (cur_yaw + YAW_ERR_SIGN * yaw_err_deg) % 360.0
+                    if self._yaw_align and tel_snap.get("mode") in YAW_MODES:
+                        now_yaw = time.time()
+                        if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
+                            self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
+                            self._last_yaw_tx = now_yaw
 
         # kamerakalibrering: implied markavstånd (cm) = agl*tan(vinkel), och uppmätt
         # brännvidd ur ArUco-markörens px-storlek + känd fysisk storlek + agl.
@@ -440,11 +410,10 @@ class PrecLandController:
             gx, gy = agl * math.tan(ax), agl * math.tan(ay)
             calib = {"goff_cm": round(100 * math.hypot(gx, gy)), "px": None,
                      "f_meas": None, "assumed_f": round(ASSUMED_F)}
-            if target.source == "aruco":
-                px = target.px_size()
-                if px:
-                    calib["px"] = round(px, 1)
-                    calib["f_meas"] = round(px * agl / MARKER_M)
+            px = target.px_size()
+            if px:
+                calib["px"] = round(px, 1)
+                calib["f_meas"] = round(px * agl / MARKER_M)
 
         # Pi-latens (kamera-fångst → nu, strax efter skick) + verklig loop-takt, EWMA
         now = time.time()
@@ -470,20 +439,17 @@ class PrecLandController:
                 loop_hz=(round(self._loop_hz, 1) if self._loop_hz else None),
             )
 
-        # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg)
+        # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg). `sent`
+        # skickas inte med — _row() räknar om den (phase != RTK and target) själv.
         if need_video and bgr is not None:
-            self._enqueue((bgr, target, phase, agl, sent, self._armed,
+            self._enqueue((bgr, target, phase, agl,
                            self._recording, ox, oy, ax, ay, time.time(),
                            self.tel.snapshot(), yaw_err_deg, yaw_cmd_deg))
 
-    def _decide_phase(self, agl, aruco):
-        if agl is None:                       # ingen AGL (t.ex. bänk utan TF-Luna) → detektionsbaserat
-            return PHASE_ARUCO if aruco is not None else PHASE_COLOR
-        if agl < self.RTK_AGL:
+    def _decide_phase(self, agl):
+        if agl is not None and agl < self.RTK_AGL:
             return PHASE_RTK
-        if aruco is not None and agl < self.ARUCO_MAX_AGL:
-            return PHASE_ARUCO
-        return PHASE_COLOR
+        return PHASE_ARUCO
 
     def _enqueue(self, item):
         try:
@@ -499,7 +465,8 @@ class PrecLandController:
                 pass
 
     def _writer_loop(self):
-        """Bakgrund: annotera, encoda JPEG (web), skriv inspelning + CSV."""
+        """Bakgrund: annotera, mata en nedskalad/frame-rate-begränsad live-förhands-
+        visning (bara när någon tittar), skriv inspelning (full upplösning) + CSV."""
         writer = csvf = None
         try:
             while True:
@@ -509,20 +476,34 @@ class PrecLandController:
                     if writer is not None and not self._recording:
                         writer.release(); csvf.close(); writer = csvf = None
                     continue
-                if item is None:
-                    break
-                (bgr, target, phase, agl, sent, armed, recording,
+                (bgr, target, phase, agl, recording,
                  ox, oy, ax, ay, t, tel, yaw_err_deg, yaw_cmd_deg) = item
-                out = self.det.annotate(bgr, target, phase=phase, agl=agl)
-                ok, jpg = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                if ok:
-                    self.cam.push_frame(jpg.tobytes())
+
+                do_push = False
+                if self.cam.viewers > 0:
+                    now = time.time()
+                    if now - self._last_push_ts >= 1.0 / self.PUSH_HZ:
+                        self._last_push_ts = now
+                        do_push = True
+
+                # annotate() ritar på hela 1024x768-rutan — bara värt kostnaden om den
+                # faktiskt ska visas (do_push) eller sparas (recording), inte annars
+                # (t.ex. en enqueue som bara nådde tröskeln pga inspelning medan preview-
+                # takten redan har sin egen frame nyss).
+                out = self.det.annotate(bgr, target, phase=phase, agl=agl) if (do_push or recording) else None
+
+                if do_push:
+                    small = cv2.resize(out, self.PUSH_SIZE, interpolation=cv2.INTER_AREA)
+                    ok, jpg = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                    if ok:
+                        self.cam.push_frame(jpg.tobytes())
+
                 if recording:
                     if writer is None:
                         writer, csvf = self._open_recording()
                     writer.write(out)
-                    csvf.write(self._row(t, tel, armed, agl, phase, target,
-                                         ox, oy, ax, ay, sent, yaw_err_deg, yaw_cmd_deg))
+                    csvf.write(self._row(t, tel, agl, phase, target,
+                                         ox, oy, ax, ay, yaw_err_deg, yaw_cmd_deg))
                 elif writer is not None:
                     writer.release(); csvf.close(); writer = csvf = None
         finally:
@@ -531,10 +512,11 @@ class PrecLandController:
             if csvf is not None:
                 csvf.close()
 
-    def _row(self, t, tel, armed, agl, phase, target, ox, oy, ax, ay, sent,
+    def _row(self, t, tel, agl, phase, target, ox, oy, ax, ay,
              yaw_err_deg, yaw_cmd_deg):
+        sent = phase != PHASE_RTK and target is not None
         return ",".join([
-            "%.3f" % t, str(tel.get("mode", "")), "1" if armed else "0",
+            "%.3f" % t, str(tel.get("mode", "")), "1",
             _f(tel.get("roll")), _f(tel.get("pitch")), _f(tel.get("yaw")), _f(tel.get("heading")),
             _f(tel.get("alt")), _f(agl), _f(tel.get("voltage")), _f(tel.get("battery_remaining")),
             _f(tel.get("fix_type")), _f(tel.get("satellites")), phase or "",
@@ -550,20 +532,18 @@ class PrecLandController:
 if __name__ == "__main__":
     import sys
 
-    src = cv2.imread(sys.argv[1])
+    src = cv2.imread(sys.argv[1], cv2.IMREAD_GRAYSCALE)
     target_px = int(sys.argv[2]) if len(sys.argv) > 2 else 300
-    # simulera "sett från höjd": lägg plattan i target_px storlek på grå 640x480
+    # simulera "sett från höjd": lägg plattan i target_px storlek på grå CV_W x CV_H
     scaled = cv2.resize(src, (target_px, target_px))
-    frame = np.full((CV_H, CV_W, 3), 110, np.uint8)
+    frame = np.full((CV_H, CV_W), 110, np.uint8)
     y0, x0 = (CV_H - target_px) // 2, (CV_W - target_px) // 2
     frame[y0:y0 + target_px, x0:x0 + target_px] = scaled
 
     det = PrecLandDetector()
-    a = det.detect_aruco(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
-    c = det.detect_color(frame)
-    print("platta %d px i 640x480:" % target_px)
+    a = det.detect_aruco(frame)
+    print("platta %d px i %dx%d:" % (target_px, CV_W, CV_H))
     print("  ArUco:", "id=%d @ (%.0f,%.0f)" % (a.aruco_id, a.u, a.v) if a else "MISS")
-    print("  Color:", "r=%.0f @ (%.0f,%.0f)" % (c.radius, c.u, c.v) if c else "MISS")
-    out = det.annotate(frame, a or c, phase="TEST")
+    out = det.annotate(cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR), a, phase="TEST")
     cv2.imwrite("/tmp/precland_test.png", out)
     print("  -> /tmp/precland_test.png")

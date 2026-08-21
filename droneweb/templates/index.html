@@ -119,7 +119,6 @@
 
         <div class="card" id="precland-card">
           <h2>Precision landing</h2>
-          <button id="pl-arm" class="btn-arm">Arm</button>
           <button id="pl-rec" class="btn-rec">● Record</button>
           <div class="row"><span>Phase</span><b><span id="pl-phase">off</span></b></div>
           <div class="row"><span>Target</span><b><span id="pl-source">–</span></b></div>
@@ -142,17 +141,16 @@
           <h2>Yaw alignment</h2>
           <label class="row chk">
             <span>Rotate to face marker</span>
-            <input type="checkbox" id="yaw-enabled">
+            <input type="checkbox" id="yaw-enabled" checked>
           </label>
           <div class="row"><span>Yaw error</span><b><span id="yaw-err">–</span> deg</b></div>
           <div class="slider-row">
-            <div class="slider-lbl"><span>Turn rate</span><b><span id="yaw-rate-val">30</span></b> deg/s</div>
-            <input type="range" id="yaw-rate" min="5" max="90" step="5" value="30">
+            <div class="slider-lbl"><span>Turn rate</span><b><span id="yaw-rate-val">45</span></b> deg/s</div>
+            <input type="range" id="yaw-rate" min="5" max="90" step="5" value="45">
           </div>
           <div class="hint-sm">Yaws the drone during descent so the nose stays in the same
             direction relative to the marker (the drawn arrow points up), without stopping
-            the descent. Only active on ArUco (close range). Off = unchanged behavior.
-            Verify the rotation direction on the bench before flying.</div>
+            the descent. Only sends while in LAND or RTL mode. Off = unchanged behavior.</div>
         </div>
 
         <div class="card" id="exposure-card">
@@ -179,8 +177,8 @@
           <div class="row"><span>Measured focal length</span><b><span id="cal-f">–</span> px</b></div>
           <div class="row"><span>Scale error</span><b><span id="cal-scale">–</span></b></div>
           <div class="row"><span>Ground offset (impl)</span><b><span id="cal-goff">–</span> cm</b></div>
-          <div class="hint-sm">Start the CV loop (● Record is enough), point the camera straight down at the
-            flat, centered ArUco marker. <b>Measured focal length</b> should ~match the assumed value (~530). Scale error ≠ 1.0
+          <div class="hint-sm">Point the camera straight down at the
+            flat, centered ArUco marker (tracking always runs). <b>Measured focal length</b> should ~match the assumed value (~849). Scale error ≠ 1.0
             → the angles sent to ArduPilot are mis-scaled by that factor. <b>Ground offset</b> should match the measured
             lateral offset with a tape measure. Requires the correct <code>MARKER_M</code> (the marker's true side length).</div>
         </div>

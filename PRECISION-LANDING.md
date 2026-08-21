@@ -8,24 +8,29 @@ webbgränssnittet. Bygger på Steg 1 ([`WEB-INTERFACE.md`](WEB-INTERFACE.md)).
 > drönaren kommer ner på rätt höjd och ser plattan, ingen översläng, styrskala=1.0. Verifierat
 > med många landningar i både LAND- och RTL-läge. Se Flygtest #3 nedan för grundorsak/fix och
 > Flygtest #4 för verifieringsflygningen.
+>
+> **2026-08-21:** färgläge borttaget, upplösning höjd till 1024×768, spårningen kör nu alltid
+> (ingen Arm-knapp). Se Steg 3-avsnittet nedan — **INTE flygtestad än vid denna upplösning/
+> alltid-på-form.**
 
-## Faser (färg → ArUco → RTK)
+## Faser (ArUco → RTK)
+
+Färgläget (orange cirkel, för mål på hög höjd) togs bort 2026-08-21 — se Steg 3-avsnittet
+nedan för varför.
 
 | Fas | Villkor | Mål-detektor | Skickar |
 |---|---|---|---|
-| **COLOR** | AGL ≳ 3,5 m *eller* ArUco ej sedd | orange cirkel (HSV-centroid) | `LANDING_TARGET` |
-| **ARUCO** | ArUco sedd *och* AGL < 3,5 m | ArUco `DICT_4X4_50` ID 0 | `LANDING_TARGET` (exaktare) |
-| **RTK-HÅLL** | AGL < 0,5 m *eller* mål tappat lågt | — | inget → RTK håller x/y + landar |
+| **ARUCO** | AGL ≥ 0,5 m (eller AGL okänd) | ArUco `DICT_4X4_50` ID 0 | `LANDING_TARGET` |
+| **RTK-HÅLL** | AGL < 0,5 m | — | inget → RTK håller x/y + landar |
 
-Utan TF-Luna (AGL = None, t.ex. bänk) körs **detektionsbaserad** fas: ArUco om den syns, annars
-färg. Trösklarna `ARUCO_MAX_AGL` / `RTK_AGL` finns i [`droneweb/precland.py`](droneweb/precland.py).
+Tröskeln `RTK_AGL` finns i [`droneweb/precland.py`](droneweb/precland.py).
 
 ## Plattan
 
 Se [`landing-marker/`](landing-marker/): `marker_40cm.png` (skriv ut i **40 cm** — markören blir
 30 cm, vit kant = quiet-zone) centrerad i en **Ø 62 cm matt safety-orange cirkel**. Markör =
-`DICT_4X4_50` **ID 0** (måste matcha `ARUCO_ID` i precland.py). Räckvidd @ 640×480: färg ~8 m,
-ArUco tillförlitligt ~3 m (rök-testad detektering ned till ~34 px markör).
+`DICT_4X4_50` **ID 0** (måste matcha `ARUCO_ID` i precland.py). Räckvidd @ 1024×768 (sedan
+2026-08-21, se Steg 3 nedan): ArUco ensam täcker hela intervallet ner till RTK-hold.
 
 ## TF-Luna (AGL via I2C) — verifierad setup
 
@@ -82,12 +87,14 @@ Läggs i param-backupen (`cube-full-params-*.param`) efter att de satts.
 
 ## Användning
 
-1. Öppna webben, flyg (piloten) drönaren över plattan.
-2. Tryck **Aktivera** i precland-panelen (bekräfta-dialog). Pi:n skickar `LANDING_TARGET` när
-   ett mål syns; videon växlar till **annoterad** vy (cirkel/markör-box, offset, fas, AGL).
-3. Piloten går till **LAND** — ArduPilot korrigerar x/y mot målet och sjunker; under ~0,5 m
-   släpper Pi:n och RTK håller in touchdown.
-4. **Avaktivera** när som helst; pilotens läges-byte/RC vinner alltid. **Pi:n armar/flyger aldrig.**
+Sedan Steg 3 (2026-08-21) körs spårningen **alltid**, ingen Aktivera-knapp längre — se
+Steg 3-avsnittet nedan.
+
+1. Öppna webben, flyg (piloten) drönaren över plattan. Videon i precland-fliken visar redan
+   den annoterade spårnings-vyn (markör-box, riktningspil, offset, fas, AGL).
+2. Piloten går till **LAND** (eller **RTL**) — ArduPilot korrigerar x/y mot målet och sjunker;
+   under 0,5 m släpper Pi:n och RTK håller in touchdown.
+3. Pilotens läges-byte/RC vinner alltid. **Pi:n armar/flyger aldrig.**
 
 ## Inspelning (för fältanalys i efterhand)
 
@@ -111,17 +118,10 @@ inriktnings-konvergens, fas-övergångar, `sent`) och titta på videon för visu
 
 - **Kamera→kropp-mappning** i `image_to_body()` (precland.py): flytta målet mot nosen →
   `angle_x` ska bli positiv. Rotera mappningen om kameran är monterad annorlunda. **Kritiskt.**
-- **HSV-färg** (`ORANGE_H_LO/HI`, `ORANGE_S_MIN`, `ORANGE_V_MIN`): kalibrerat i sol 2026-07-30 —
-  plattan avbildas som **mättad röd (H≈0, S≈240, V≈214)**, inte orange, så trösklarna använder
-  **hue-wrap** (H ≤ 12 ELLER ≥ 165) + hög S/V → separerar rent mot grönt gräs (H~40-80).
-  **Omkalibrera** vid annat ljus med `droneweb/tune_color.py` (samplar plattan via ArUco → HSV).
-  Fast exponering/AWB (picamera2-controls) ger stabilast färg om ljuset varierar mycket.
 - **Kamera-kalibrering** (schackbräde) för exakta vinklar; nu används FOV-approx.
-
-## RAM (Pi 3A+)
-
-cv2 laddas **lazy** vid första arm → Steg 1-RAM oförändrad. Armerat: droneweb-RSS ~**187 MB**,
-~105 MB fritt + swap. Fungerar men snålt. Vid tryck: sänk upplösning/`RATE_HZ`, eller Pi 4/5.
+- **Loop-takt vid 1024×768** (2026-08-21): `RATE_HZ=40` är omverifierat på Pi 5 vid 640×480 men
+  INTE vid den nya upplösningen — kolla `loop_hz` i webben efter uppgradering, sänk om den inte
+  håller 40.
 
 ## Test-stege (säkerhet först)
 
@@ -287,6 +287,37 @@ till nära noll vid touchdown, utan att nedstigningen pausade:
 T.ex. `_232124`: AGL 7,91→3,83→0,66→0,14 m medan `yaw` samtidigt svängde 213°→306,5°→309,3° och la sig
 — konvergerar på någon sekund, nedstigningen fortsätter oavbrutet genom hela korrigeringen.
 `YAW_ERR_SIGN=1` bekräftat rätt i verklig flygning, inte bara på bänken.
+
+## Steg 3 — gråskale-spårning, alltid på, färgläge borttaget (2026-08-21)
+
+Efter bänktest med en 1:4-skalad markör (se ovan-diskussionen i sessionen som ledde hit): ArUco-
+räckvidden, inte upplösningen, var den faktiska begränsningen — färgläget (orange cirkel) gav ingen
+extra räckvidd i praktiken jämfört med vad ArUco redan klarade. Ändringar:
+
+- **Färgläge borttaget helt** — ingen HSV-detektering, ingen `COLOR`-fas. `Faser`-tabellen ovan
+  uppdaterad.
+- **Upplösning 640×480 → 1024×768** — fler px/grad ger ArUco längre räckvidd (samma geometri som
+  markör-skalnings-testet, omvänt). `FX`/`FY`/`CX`/`CY` skalar automatiskt.
+- **Gråskala** — kameran (`camera.py`) körs nu med en enda ström (ingen lores/main-uppdelning);
+  detekteringen använder bara Y-planet. Overlay-färg (grön) läggs på via en billig
+  `GRAY2BGR`-replikering, inte en riktig färgkonvertering.
+- **Alltid på** — `PrecLandController` startar sin loop direkt vid appstart, ingen Arm/Disarm
+  längre. Detta är säkert för `LANDING_TARGET` (AC_PrecLand agerar redan bara i relevanta lägen/
+  faser) men INTE lika självklart för `CONDITION_YAW` (auto_yaw-målet är "sticky" och dess
+  beteende vid lägesbyte är overifierat) — därför skickas `CONDITION_YAW` numera bara när
+  flygläget är **LAND** eller **RTL** (`YAW_MODES` i precland.py), oavsett `yaw_align`-inställning.
+- **Rå-FPV-läget borttaget** för den nedåtriktade kameran (`camera.py`) — den var bara till för
+  tidig kameraexperimentering, används inte i normal flygning. All video från den kameran är nu
+  spårningens egen annoterade vy.
+- **Live-förhandsvisning halverad** — 512×384 @ 20 FPS (från 1024×768 @ upp till 40 FPS) för att
+  spara bandbredd; bara aktiv när precland-fliken faktiskt är öppen. Inspelning (.avi) är
+  opåverkad — full upplösning, oberoende takt.
+- **RTK-hold-övergången återställd** vid 0,5 m (tidigare temporärt bortkopplad för bänktestet av
+  markör-skalningen).
+
+**EJ flygtestad ännu** vid denna upplösning/alltid-på-form — `RATE_HZ=40` är inte omverifierat vid
+1024×768 (kolla `loop_hz` i webben efter uppgradering), och CONDITION_YAW-läges-grinden (LAND/RTL)
+är ny och overifierad i luften.
 
 ## Uppskjutet
 

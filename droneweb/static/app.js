@@ -259,26 +259,18 @@ $("shutdown").addEventListener("click", async () => {
   }
 });
 
-// ---- precision landing ---------------------------------------------------
-let plArmed = false;
-const plBtn = $("pl-arm"), plCard = $("precland-card");
-
+// ---- precision landing (tracking always runs, no arm/disarm anymore) -----
 async function pollPrecland() {
   try {
     const p = await (await fetch("/api/precland", { cache: "no-store" })).json();
-    plArmed = !!p.armed;
-    plBtn.textContent = plArmed ? "Disarm" : "Arm";
-    plBtn.classList.toggle("armed", plArmed);
-    plCard.classList.toggle("armed", plArmed);
-    $("pl-phase").textContent = p.phase || (plArmed ? "…" : "off");
+    $("pl-phase").textContent = p.phase || "…";
     $("pl-source").textContent = p.source || "–";
     $("pl-agl").textContent = p.agl != null ? Number(p.agl).toFixed(2) : "–";
     $("pl-offset").textContent = p.offset ? `${p.offset[0]}, ${p.offset[1]}` : "–";
     $("pl-tx").textContent = p.sent ? `sending (${p.tx})` : (p.tx ? `paused (${p.tx})` : "–");
     $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "none";
-    const running = p.armed || p.recording;
-    $("pl-lat").textContent = running && p.latency_ms != null ? p.latency_ms : "–";
-    $("pl-hz").textContent = running && p.loop_hz != null ? p.loop_hz : "–";
+    $("pl-lat").textContent = p.latency_ms != null ? p.latency_ms : "–";
+    $("pl-hz").textContent = p.loop_hz != null ? p.loop_hz : "–";
     updateRecBtn(p.recording);
     exposureCtl.seed(p.exposure);
     renderCalib(p.calib);
@@ -470,18 +462,6 @@ async function pollRecordings() {
       }));
   } catch (e) {}
 }
-
-plBtn.addEventListener("click", async () => {
-  const want = !plArmed;
-  if (want && !confirm("Arm precision landing?\n\nThe Pi will start sending LANDING_TARGET to ArduPilot once a target is visible. Only use when landing over the pad.")) return;
-  try {
-    await fetch("/api/precland", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ armed: want }),
-    });
-    pollPrecland();
-  } catch (e) { alert("Error: " + e); }
-});
 
 // ---- network (home WiFi vs 4G dongle) -------------------------------------
 let netWifiEnabled = true;
