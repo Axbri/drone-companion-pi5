@@ -137,6 +137,25 @@
             Adjust live. Logged in the CSV.</div>
         </div>
 
+        <div class="card" id="thresh-card">
+          <h2>Altitude thresholds</h2>
+          <div class="slider-row">
+            <div class="slider-lbl"><span>Start looking for ArUco below</span><b><span id="th-aruco-val">5.0</span></b> m</div>
+            <input type="range" id="th-aruco" min="1" max="10" step="0.5" value="5">
+          </div>
+          <div class="slider-row">
+            <div class="slider-lbl"><span>Start rotating below</span><b><span id="th-yaw-val">5.0</span></b> m</div>
+            <input type="range" id="th-yaw" min="0.5" max="10" step="0.5" value="5">
+          </div>
+          <div class="slider-row">
+            <div class="slider-lbl"><span>Switch to RTK-hold below</span><b><span id="th-rtk-val">0.50</span></b> m</div>
+            <input type="range" id="th-rtk" min="0.1" max="2" step="0.1" value="0.5">
+          </div>
+          <div class="hint-sm">Live, adjustable while flying. Above the ArUco threshold nothing is
+            detected (phase shows WAIT). Below the RTK threshold, sending stops and RTK holds position
+            for touchdown. The rotate threshold only matters when yaw alignment (below) is on.</div>
+        </div>
+
         <div class="card" id="yaw-card">
           <h2>Yaw alignment</h2>
           <label class="row chk">

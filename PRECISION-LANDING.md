@@ -13,15 +13,21 @@ webbgränssnittet. Bygger på Steg 1 ([`WEB-INTERFACE.md`](WEB-INTERFACE.md)).
 > (ingen Arm-knapp). Se Steg 3-avsnittet nedan — **INTE flygtestad än vid denna upplösning/
 > alltid-på-form.**
 
-## Faser (ArUco → RTK)
+## Faser (WAIT → ArUco → RTK)
 
 Färgläget (orange cirkel, för mål på hög höjd) togs bort 2026-08-21 — se Steg 3-avsnittet
 nedan för varför.
 
 | Fas | Villkor | Mål-detektor | Skickar |
 |---|---|---|---|
-| **ARUCO** | AGL ≥ 0,5 m (eller AGL okänd) | ArUco `DICT_4X4_50` ID 0 | `LANDING_TARGET` |
-| **RTK-HÅLL** | AGL < 0,5 m | — | inget → RTK håller x/y + landar |
+| **WAIT** | AGL > `aruco_start_agl` | — | inget (letar inte ens) |
+| **ARUCO** | `rtk_agl` ≤ AGL ≤ `aruco_start_agl` (eller AGL okänd) | ArUco `DICT_4X4_50` ID 0 | `LANDING_TARGET` |
+| **RTK-HÅLL** | AGL < `rtk_agl` | — | inget → RTK håller x/y + landar |
+
+Alla tre trösklar (`aruco_start_agl`, `rtk_agl`, plus `yaw_start_agl` för girinriktningen — se
+nedan) är **live-justerbara i webben** (kortet "Altitude thresholds") för experiment under
+flygning. Default/gränser: `aruco_start_agl` 5 m (1–10), `rtk_agl` 0,5 m (0,1–2), `yaw_start_agl`
+5 m (0,5–10).
 
 Tröskeln `RTK_AGL` finns i [`droneweb/precland.py`](droneweb/precland.py).
 
@@ -318,6 +324,23 @@ extra räckvidd i praktiken jämfört med vad ArUco redan klarade. Ändringar:
 **EJ flygtestad ännu** vid denna upplösning/alltid-på-form — `RATE_HZ=40` är inte omverifierat vid
 1024×768 (kolla `loop_hz` i webben efter uppgradering), och CONDITION_YAW-läges-grinden (LAND/RTL)
 är ny och overifierad i luften.
+
+## Höjdtrösklar live-justerbara i webben (2026-08-21)
+
+De tre höjdgränserna (`aruco_start_agl`, `rtk_agl`, `yaw_start_agl`) är inte längre hårdkodade
+konstanter — de går att ändra live i webben (kortet "Altitude thresholds", precland-fliken) för
+att experimentera under en flygning, utan omdeploy. `PrecLandController.set_thresholds()` klämmer
+var och en oberoende (ingen inbördes ordning tvingas). Se `Faser`-tabellen ovan för vad varje
+tröskel styr.
+
+| Tröskel | Default | Min | Max |
+|---|---|---|---|
+| `aruco_start_agl` | 5 m | 1 m | 10 m |
+| `yaw_start_agl` | 5 m | 0,5 m | 10 m |
+| `rtk_agl` | 0,5 m | 0,1 m | 2 m |
+
+(Justerat 2026-08-21 från de initiala default/gränserna 15 m / 3,5 m / 0,5 m, max 30/30/3 m —
+snävare intervall bättre anpassade för faktisk flygtestning.)
 
 ## Uppskjutet
 

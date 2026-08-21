@@ -227,6 +227,16 @@ def api_landscale():
     return jsonify({"cmd_scale": precland.set_cmd_scale(want.get("scale", 1.0))})
 
 
+@app.route("/api/thresholds", methods=["POST"])
+def api_thresholds():
+    want = request.get_json(force=True, silent=True) or {}
+    return jsonify(precland.set_thresholds(
+        aruco_start_agl=want.get("aruco_start_agl"),
+        rtk_agl=want.get("rtk_agl"),
+        yaw_start_agl=want.get("yaw_start_agl"),
+    ))
+
+
 @app.route("/api/yawalign", methods=["POST"])
 def api_yawalign():
     want = request.get_json(force=True, silent=True) or {}

@@ -277,8 +277,46 @@ async function pollPrecland() {
     seedScale(p.cmd_scale);
     seedYaw(p.yaw_align);
     $("yaw-err").textContent = p.yaw_err_deg != null ? p.yaw_err_deg : "–";
+    seedThresholds(p.thresholds);
   } catch (e) {}
 }
+
+// ---- altitude thresholds (live-tunable while flying) ----------------------
+const thAruco = $("th-aruco"), thYaw = $("th-yaw"), thRtk = $("th-rtk");
+let thSeeded = false, thTimer = null;
+
+function reflectThresholds() {
+  $("th-aruco-val").textContent = Number(thAruco.value).toFixed(1);
+  $("th-yaw-val").textContent = Number(thYaw.value).toFixed(1);
+  $("th-rtk-val").textContent = Number(thRtk.value).toFixed(2);
+}
+
+function sendThresholds() {
+  fetch("/api/thresholds", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      aruco_start_agl: Number(thAruco.value),
+      yaw_start_agl: Number(thYaw.value),
+      rtk_agl: Number(thRtk.value),
+    }),
+  }).catch(() => {});
+}
+
+function seedThresholds(t) {
+  if (!t || thSeeded) return;
+  thSeeded = true;
+  thAruco.value = t.aruco_start_agl;
+  thYaw.value = t.yaw_start_agl;
+  thRtk.value = t.rtk_agl;
+  reflectThresholds();
+}
+
+[thAruco, thYaw, thRtk].forEach((el) => el.addEventListener("input", () => {
+  reflectThresholds();
+  clearTimeout(thTimer);
+  thTimer = setTimeout(sendThresholds, 120);
+}));
+reflectThresholds();
 
 // ---- control scale (command scaling to ArduPilot) ------------------------
 const scaleEl = $("pl-scale");

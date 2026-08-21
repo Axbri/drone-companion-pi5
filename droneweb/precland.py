@@ -48,7 +48,7 @@ CX, CY = CV_W / 2.0, CV_H / 2.0
 MARKER_M = 0.30
 ASSUMED_F = FX               # antagen brännvidd (px) att jämföra uppmätt mot
 
-PHASE_ARUCO, PHASE_RTK = "ARUCO", "RTK-HOLD"
+PHASE_WAIT, PHASE_ARUCO, PHASE_RTK = "WAIT", "ARUCO", "RTK-HOLD"
 
 # Fast exponering under CV-loopen (mot motion blur på höjd — Fynd 1). Kort slutartid
 # fryser rörelsen så rutan blir skarp trots kameravibration; auto-exponering (default)
@@ -222,10 +222,11 @@ def _f(v, nd=3):
 
 class PrecLandController:
     """Kör CV-loopen kontinuerligt från appens start (ingen manuell Arm/Disarm
-    längre): väljer fas efter AGL (ARUCO eller RTK-HOLD under RTK_AGL), detekterar,
-    skickar LANDING_TARGET (utom i RTK-fasen), matar en nedskalad live-förhandsvisning
-    (bara när någon tittar), och spelar in synkad video (.avi) + datalogg (.csv) på
-    begäran (oberoende av spårningen, som alltid går)."""
+    längre): väljer fas efter AGL — WAIT (ovanför aruco_start_agl, letar inte alls),
+    ARUCO (detekterar + skickar LANDING_TARGET), RTK-HOLD (under rtk_agl, slutar
+    skicka) — matar en nedskalad live-förhandsvisning (bara när någon tittar), och
+    spelar in synkad video (.avi) + datalogg (.csv) på begäran (oberoende av
+    spårningen, som alltid går). Höjdtrösklarna är live-justerbara, se set_thresholds()."""
 
     RATE_HZ = 40          # kontroll-loopens tak (matchar kamera-FPS). Tung JPEG-encode + inspelning
                           # körs i separat writer-tråd, så detekt+skick av LANDING_TARGET tightas
@@ -233,8 +234,16 @@ class PrecLandController:
                           # vid 640x480 — EJ omverifierat vid 1024x768 (2026-08-21), se loop_hz i webben.
     REC_FPS = 8           # AVI-fps-metadata (nominell). Verklig inspelningstakt är writer-begränsad;
                           # CSV:ns t-kolumn är den exakta tiden per ruta (ruta N = CSV-rad N).
-    RTK_AGL = 0.5         # m — under detta: sluta skicka, RTK håller x/y
     _Q_MAX = 8            # writer-köns tak → drop-oldest (håller RAM nere)
+
+    # Höjdtrösklar — live-justerbara i webben (för experiment under flygning). Default-
+    # värdena är startpunkter, inte hårda gränser; se set_thresholds().
+    ARUCO_START_AGL_DEFAULT = 5.0          # m — ovanför denna: leta inte ens efter ArUco (WAIT-fas)
+    ARUCO_START_MIN, ARUCO_START_MAX = 1.0, 10.0
+    RTK_AGL_DEFAULT = 0.5                  # m — under denna: sluta skicka, RTK håller x/y
+    RTK_AGL_MIN, RTK_AGL_MAX = 0.1, 2.0
+    YAW_START_AGL_DEFAULT = 5.0            # m — girinriktning börjar inte förrän under denna höjd
+    YAW_START_MIN, YAW_START_MAX = 0.5, 10.0
 
     YAW_RATE_DEFAULT = 45.0        # deg/s, live-justerbar i webben
     YAW_RATE_MIN, YAW_RATE_MAX = 5.0, 90.0
@@ -257,6 +266,9 @@ class PrecLandController:
         self._exposure_us = CV_EXPOSURE_US
         self._gain = CV_GAIN
         self._cmd_scale = CMD_SCALE_DEFAULT   # styrskala för LANDING_TARGET (live)
+        self._aruco_start_agl = self.ARUCO_START_AGL_DEFAULT
+        self._rtk_agl = self.RTK_AGL_DEFAULT
+        self._yaw_start_agl = self.YAW_START_AGL_DEFAULT
         self._yaw_align = True                # av = ingen CONDITION_YAW skickas alls
         self._yaw_rate = self.YAW_RATE_DEFAULT
         self._last_yaw_tx = 0.0
@@ -287,6 +299,25 @@ class PrecLandController:
         """Styrskala [0.1, 1.0] för LANDING_TARGET-vinklarna. Live."""
         self._cmd_scale = float(max(0.1, min(1.0, s)))
         return round(self._cmd_scale, 2)
+
+    def threshold_status(self):
+        return {"aruco_start_agl": round(self._aruco_start_agl, 1),
+                "rtk_agl": round(self._rtk_agl, 2),
+                "yaw_start_agl": round(self._yaw_start_agl, 1)}
+
+    def set_thresholds(self, aruco_start_agl=None, rtk_agl=None, yaw_start_agl=None):
+        """Höjdtrösklar (AGL, meter), live-justerbara för experiment under flygning:
+        aruco_start_agl = ovanför denna letas inte ens efter ArUco (fas WAIT),
+        rtk_agl = under denna slutar sändningen, RTK håller (fas RTK-HOLD),
+        yaw_start_agl = under denna får girinriktning börja (kräver även yaw_align på).
+        Klämmer var för sig — ingen inbördes ordning tvingas fram."""
+        if aruco_start_agl is not None:
+            self._aruco_start_agl = float(max(self.ARUCO_START_MIN, min(self.ARUCO_START_MAX, aruco_start_agl)))
+        if rtk_agl is not None:
+            self._rtk_agl = float(max(self.RTK_AGL_MIN, min(self.RTK_AGL_MAX, rtk_agl)))
+        if yaw_start_agl is not None:
+            self._yaw_start_agl = float(max(self.YAW_START_MIN, min(self.YAW_START_MAX, yaw_start_agl)))
+        return self.threshold_status()
 
     def yaw_align_status(self):
         return {"enabled": self._yaw_align, "rate_degs": round(self._yaw_rate, 1)}
@@ -326,6 +357,7 @@ class PrecLandController:
         s["exposure"] = self.exposure_status()
         s["cmd_scale"] = round(self._cmd_scale, 2)
         s["yaw_align"] = self.yaw_align_status()
+        s["thresholds"] = self.threshold_status()
         rf = self.rf.status() if self.rf else {"ok": False}
         s["rangefinder_ok"] = rf.get("ok", False)
         return s
@@ -397,7 +429,8 @@ class PrecLandController:
                 cur_yaw = tel_snap.get("yaw")
                 if cur_yaw is not None:
                     yaw_cmd_deg = (cur_yaw + YAW_ERR_SIGN * yaw_err_deg) % 360.0
-                    if self._yaw_align and tel_snap.get("mode") in YAW_MODES:
+                    if (self._yaw_align and tel_snap.get("mode") in YAW_MODES
+                            and agl is not None and agl <= self._yaw_start_agl):
                         now_yaw = time.time()
                         if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
                             self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
@@ -447,8 +480,12 @@ class PrecLandController:
                            self.tel.snapshot(), yaw_err_deg, yaw_cmd_deg))
 
     def _decide_phase(self, agl):
-        if agl is not None and agl < self.RTK_AGL:
+        if agl is None:                        # ingen AGL (t.ex. bänk utan TF-Luna) -> detektera ändå
+            return PHASE_ARUCO
+        if agl < self._rtk_agl:
             return PHASE_RTK
+        if agl > self._aruco_start_agl:
+            return PHASE_WAIT
         return PHASE_ARUCO
 
     def _enqueue(self, item):
