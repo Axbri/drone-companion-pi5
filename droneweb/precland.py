@@ -243,7 +243,7 @@ class PrecLandController:
 
     # Höjdtrösklar — live-justerbara i webben (för experiment under flygning). Default-
     # värdena är startpunkter, inte hårda gränser; se set_thresholds().
-    ARUCO_START_AGL_DEFAULT = 5.0          # m — ovanför denna: leta inte ens efter ArUco (WAIT-fas)
+    ARUCO_START_AGL_DEFAULT = 7.0          # m — ovanför denna: leta inte ens efter ArUco (WAIT-fas)
     ARUCO_START_MIN, ARUCO_START_MAX = 1.0, 10.0
     RTK_AGL_DEFAULT = 0.5                  # m — under denna: sluta skicka, RTK håller x/y
     RTK_AGL_MIN, RTK_AGL_MAX = 0.1, 2.0

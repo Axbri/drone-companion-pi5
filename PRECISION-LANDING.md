@@ -32,7 +32,7 @@ men skickar inget".
 
 Alla tre trösklar (`aruco_start_agl`, `rtk_agl`, plus `yaw_start_agl` för girinriktningen — se
 nedan) är **live-justerbara i webben** (kortet "Altitude thresholds") för experiment under
-flygning. Default/gränser: `aruco_start_agl` 5 m (1–10), `rtk_agl` 0,5 m (0,1–2), `yaw_start_agl`
+flygning. Default/gränser: `aruco_start_agl` 7 m (1–10), `rtk_agl` 0,5 m (0,1–2), `yaw_start_agl`
 5 m (0,5–10).
 
 Tröskeln `RTK_AGL` finns i [`droneweb/precland.py`](droneweb/precland.py).
@@ -341,13 +341,45 @@ tröskel styr.
 
 | Tröskel | Default | Min | Max |
 |---|---|---|---|
-| `aruco_start_agl` | 5 m | 1 m | 10 m |
+| `aruco_start_agl` | 7 m | 1 m | 10 m |
 | `yaw_start_agl` | 5 m | 0,5 m | 10 m |
 | `rtk_agl` | 0,5 m | 0,1 m | 2 m |
+
+(`aruco_start_agl`-defaulten höjd 5→7 m 2026-08-21 efter Flygtest #6 — se nedan. De två andra
+oförändrade, matchar vad som faktiskt flögs med.)
 
 (Justerat 2026-08-21 från de initiala default/gränserna 15 m / 3,5 m / 0,5 m, max 30/30/3 m —
 snävare intervall bättre anpassade för faktisk flygtestning.)
 
+## Flygtest #6 — alltid-på gråskale-spårning + girinriktning, full flygenvelop (2026-08-21)
+
+Tre landningar, 8 m → touchdown, `yaw_align` på (45°/s), `aruco_start_agl` manuellt höjd till 7 m
+under flygningen (rummet vid bänktestet tidigare samma dag var bara ~5,5 m, så tröskeln höjdes för
+att få marginal — se defaultändringen ovan).
+
+| Inspelning | Dur | Detektion* | Längsta äkta lucka* | Offset konv. | Gir konv. |
+|---|---|---|---|---|---|
+| `rec_20260821_205405` | 113,8 s (LAND+LOITER) | 84,6 % | 62 rutor (~1,5 s) | 0,46→0,14 | 147°→0° |
+| `rec_20260821_205628` | 49,0 s (LAND) | 93,8 % | 6 rutor | 0,28→0,12 | -175°→1° |
+| `rec_20260821_205858` | 27,7 s (LAND+LOITER) | 93,8 % | 12 rutor | 0,42→0,19 | -69°→1° |
+
+*begränsat till rutor där TF-Luna faktiskt gav ett giltigt AGL-värde — se nedan för varför.
+
+Bekräftar: 85–94 % detektionsgrad inom den avsedda höjdbanden, korta luckor (under ~1,5 s), och
+både positionsoffset och gir-fel konvergerar rent till nära noll i alla tre — även flygningen som
+startade 175° feljusterad. Matchar pilotens intryck: tillförlitlig, tappar spårningen enstaka
+rutor ibland, styr ändå in mot målet utan problem.
+
+**Upptäckt i efteranalysen:** en stor andel av ARUCO-fasens rutor (upp till ~70 % i den längsta
+flygningen) hade **inget giltigt AGL-värde alls** från TF-Luna — de hamnade i `_decide_phase()`s
+"AGL okänt → detektera ändå"-fallback. Utan att filtrera bort dessa ser detektionsgraden mycket
+sämre ut (28–65 %, "luckor" på 11–26 s) — men de långa luckorna sammanföll nästan uteslutande med
+AGL=None-perioderna, inte med genuina missar inom en känd höjd. Höjdgrindningen (WAIT/RTK-HOLD)
+var alltså inte aktiv under en stor del av dessa flygningar. Orsak ej utredd (TF-Luna räckvidd?
+attityd-beroende? specifikt för LOITER-omplacering?) — kvarstår som öppen punkt.
+
 ## Uppskjutet
 
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
+- **TF-Luna AGL=None en stor del av flygningen** (se Flygtest #6) — varför, och går det åtgärda?
+  Höjdgrindningen (WAIT/RTK-HOLD) är inaktiv (faller till "detektera ändå") när det händer.
