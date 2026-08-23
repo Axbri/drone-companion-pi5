@@ -227,6 +227,12 @@ def api_landscale():
     return jsonify({"cmd_scale": precland.set_cmd_scale(want.get("scale", 1.0))})
 
 
+@app.route("/api/camoffset", methods=["POST"])
+def api_camoffset():
+    want = request.get_json(force=True, silent=True) or {}
+    return jsonify(precland.set_cam_offset(want.get("offset_cm")))
+
+
 @app.route("/api/thresholds", methods=["POST"])
 def api_thresholds():
     want = request.get_json(force=True, silent=True) or {}

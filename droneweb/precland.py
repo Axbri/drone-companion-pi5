@@ -63,6 +63,36 @@ CV_GAIN = 2.0
 # Justeras live i webben. Detta är i praktiken det precland-gain ArduPilot saknar.
 CMD_SCALE_DEFAULT = 1.0
 
+# Kamerans fram/bak-offset från kroppens rotationscentrum (CG), cm, kroppens X-axel
+# (framåt positivt — samma FRD-konvention som resten av modulen). ArduPilots egna
+# PLND_CAM_POS_*-parametrar verkade INTE ha effekt via MAVLink-backend'en (testat
+# 2026-08-21) — okänt om det är en begränsning i AC_PrecLand_MAVLink eller fel
+# konfigurerat, men kompenseras därför här istället. Default -16,5 cm = kameran sitter
+# 16,5 cm BAKOM CG (uppmätt). Live-justerbar i webben om kameran flyttas.
+CAM_OFFSET_DEFAULT_CM = -16.5
+CAM_OFFSET_MIN_CM, CAM_OFFSET_MAX_CM = -30.0, 30.0
+
+
+def _apply_cam_offset(ax, ay, agl, offset_fwd_m):
+    """Räknar om målets siktlinjevinkel (uppmätt från KAMERAN) till motsvarande vinkel
+    som skulle setts från CG, givet kamerans kända fasta fram/bak-offset. Utan detta
+    ger en ren gir (ingen verklig translation) en falsk skenbar målrörelse, och
+    positionskorrektionen blir systematiskt fel proportionellt mot offset/agl.
+
+    Geometri (kroppens FRD, X=fram/Y=höger/Z=ned, kameran pekar rakt ner, monterad utan
+    egen vridning relativt kroppen): målets position rel. kameran är
+    (fram, höger, ned) = agl * (-tan(ay), tan(ax), 1) — se kommentaren om
+    AC_PrecLand_MAVLink::handle_msg() ovan för samma konvention. Lägg till kamerans
+    kända position rel. CG (offset_fwd_m, 0, 0) för att få målets position rel. CG,
+    och räkna om till vinkel med samma konvention."""
+    if agl is None or agl <= 0 or offset_fwd_m == 0.0:
+        return ax, ay
+    fwd_cam = -math.tan(ay) * agl
+    right_cam = math.tan(ax) * agl
+    fwd_cg = fwd_cam + offset_fwd_m
+    down_cg = agl                          # ingen vertikal/sidled kamera-offset hanterad
+    return math.atan2(right_cam, down_cg), math.atan2(-fwd_cg, down_cg)
+
 
 class Target:
     __slots__ = ("u", "v", "source", "aruco_id", "corners")
@@ -271,6 +301,7 @@ class PrecLandController:
         self._exposure_us = CV_EXPOSURE_US
         self._gain = CV_GAIN
         self._cmd_scale = CMD_SCALE_DEFAULT   # styrskala för LANDING_TARGET (live)
+        self._cam_offset_m = CAM_OFFSET_DEFAULT_CM / 100.0   # kamerans fram/bak-offset från CG
         self._aruco_start_agl = self.ARUCO_START_AGL_DEFAULT
         self._rtk_agl = self.RTK_AGL_DEFAULT
         self._yaw_start_agl = self.YAW_START_AGL_DEFAULT
@@ -304,6 +335,16 @@ class PrecLandController:
         """Styrskala [0.1, 1.0] för LANDING_TARGET-vinklarna. Live."""
         self._cmd_scale = float(max(0.1, min(1.0, s)))
         return round(self._cmd_scale, 2)
+
+    def cam_offset_status(self):
+        return {"offset_cm": round(self._cam_offset_m * 100.0, 1)}
+
+    def set_cam_offset(self, offset_cm=None):
+        """Kamerans fram/bak-offset från CG (cm, framåt positivt). Live — flytta
+        kameran fysiskt och uppdatera detta värde, ingen omdeploy behövs."""
+        if offset_cm is not None:
+            self._cam_offset_m = float(max(CAM_OFFSET_MIN_CM, min(CAM_OFFSET_MAX_CM, offset_cm))) / 100.0
+        return self.cam_offset_status()
 
     def threshold_status(self):
         return {"aruco_start_agl": round(self._aruco_start_agl, 1),
@@ -361,6 +402,7 @@ class PrecLandController:
         s["recording"] = self._recording
         s["exposure"] = self.exposure_status()
         s["cmd_scale"] = round(self._cmd_scale, 2)
+        s["cam_offset"] = self.cam_offset_status()
         s["yaw_align"] = self.yaw_align_status()
         s["thresholds"] = self.threshold_status()
         rf = self.rf.status() if self.rf else {"ok": False}
@@ -416,14 +458,15 @@ class PrecLandController:
             self._last_enqueue_ts = now_ve
         bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR) if need_video else None
 
-        ax = ay = ox = oy = yaw_err_deg = yaw_cmd_deg = None
+        ax = ay = ax_s = ay_s = ox = oy = yaw_err_deg = yaw_cmd_deg = None
         sent = False
         if target is not None:
-            ax, ay = target.angles()
+            ax, ay = target.angles()                      # rå, kamerans egen mätning (kalibrering)
+            ax_s, ay_s = _apply_cam_offset(ax, ay, agl, self._cam_offset_m)  # korrigerad, CG-referens
             ox, oy = target.offset_norm()
             if phase == PHASE_ARUCO:
                 k = self._cmd_scale                      # styrskala: mildare korrektion
-                self.tel.send_landing_target(ax * k, ay * k, agl if agl else 0.0)
+                self.tel.send_landing_target(ax_s * k, ay_s * k, agl if agl else 0.0)
                 sent = True
                 self._tx += 1
 
@@ -483,9 +526,11 @@ class PrecLandController:
 
         # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg). `sent`
         # skickas inte med — _row() räknar om den (phase != RTK and target) själv.
+        # ax_s/ay_s (kamera-offset-korrigerade, det som faktiskt skickades) loggas i
+        # CSV:n, inte de råa ax/ay (de används bara internt för kalibreringsdiagnostik).
         if need_video and bgr is not None:
             self._enqueue((bgr, target, phase, agl,
-                           self._recording, ox, oy, ax, ay, time.time(),
+                           self._recording, ox, oy, ax_s, ay_s, time.time(),
                            self.tel.snapshot(), yaw_err_deg, yaw_cmd_deg))
 
     def _decide_phase(self, agl):

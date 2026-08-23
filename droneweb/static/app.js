@@ -278,8 +278,38 @@ async function pollPrecland() {
     seedYaw(p.yaw_align);
     $("yaw-err").textContent = p.yaw_err_deg != null ? p.yaw_err_deg : "–";
     seedThresholds(p.thresholds);
+    seedCamOffset(p.cam_offset);
   } catch (e) {}
 }
+
+// ---- camera fore/aft offset from center of rotation ------------------------
+const camOff = $("cam-off");
+let camOffSeeded = false, camOffTimer = null;
+
+function reflectCamOffset() {
+  $("cam-off-val").textContent = Number(camOff.value).toFixed(1);
+}
+
+function sendCamOffset() {
+  fetch("/api/camoffset", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ offset_cm: Number(camOff.value) }),
+  }).catch(() => {});
+}
+
+function seedCamOffset(c) {
+  if (!c || camOffSeeded) return;
+  camOffSeeded = true;
+  camOff.value = c.offset_cm;
+  reflectCamOffset();
+}
+
+camOff.addEventListener("input", () => {
+  reflectCamOffset();
+  clearTimeout(camOffTimer);
+  camOffTimer = setTimeout(sendCamOffset, 120);
+});
+reflectCamOffset();
 
 // ---- altitude thresholds (live-tunable while flying) ----------------------
 const thAruco = $("th-aruco"), thYaw = $("th-yaw"), thRtk = $("th-rtk");

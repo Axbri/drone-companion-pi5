@@ -380,6 +380,26 @@ AGL=None-perioderna, inte med genuina missar inom en känd höjd. Höjdgrindning
 var alltså inte aktiv under en stor del av dessa flygningar. Orsak ej utredd (TF-Luna räckvidd?
 attityd-beroende? specifikt för LOITER-omplacering?) — kvarstår som öppen punkt.
 
+## Kamera-offset från CG (2026-08-21)
+
+Kameran sitter inte i drönarens rotationscentrum (CG) utan **16,5 cm bakom** (uppmätt). Pilotens
+egna försök att kompensera via ArduPilots `PLND_CAM_POS_*`-parametrar gav ingen synlig effekt —
+okänt om `AC_PrecLand_MAVLink`-backend'en (som denna LANDING_TARGET-baserade lösning använder)
+stödjer den parametern alls. Kompenseras istället i `precland.py` (`_apply_cam_offset()`): målets
+siktlinjevinkel, uppmätt från kameran, räknas om geometriskt till motsvarande vinkel som skulle
+setts från CG innan den skickas — annars ger en ren gir en falsk skenbar målrörelse, och
+positionskorrektionen blir systematiskt fel med avståndet offset/AGL.
+
+Live-justerbar i webben (kortet "Camera calibration", "Camera offset from center"), ±30 cm,
+default -16,5 cm (kroppens X-axel, framåt positivt — kameran sitter alltså på minus). Uppdatera
+om kameran flyttas fysiskt.
+
+**EJ flygverifierad ännu** — tecknet är geometriskt härlett och kontrollräknat (bänk-exempel:
+markör centrerad rakt under kameran på 0,7 m AGL → korrigerad vinkel ≈13° i "målet är bakom
+CG"-riktningen, krymper med höjden), men inte bekräftat med en riktig flygning. Verifiera genom
+att hovra med markören centrerad i bild och se att drönaren kryper åt det håll som centrerar CG
+(inte kameran) över markören — om det blir sämre istället, byt tecken på `CAM_OFFSET_DEFAULT_CM`.
+
 ## Uppskjutet
 
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
