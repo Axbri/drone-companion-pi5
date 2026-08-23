@@ -32,7 +32,7 @@ men skickar inget".
 
 Alla tre trösklar (`aruco_start_agl`, `rtk_agl`, plus `yaw_start_agl` för girinriktningen — se
 nedan) är **live-justerbara i webben** (kortet "Altitude thresholds") för experiment under
-flygning. Default/gränser: `aruco_start_agl` 7 m (1–10), `rtk_agl` 0,5 m (0,1–2), `yaw_start_agl`
+flygning. Default/gränser: `aruco_start_agl` 7 m (1–10), `rtk_agl` 0,3 m (0,1–2), `yaw_start_agl`
 5 m (0,5–10).
 
 Tröskeln `RTK_AGL` finns i [`droneweb/precland.py`](droneweb/precland.py).
@@ -343,10 +343,10 @@ tröskel styr.
 |---|---|---|---|
 | `aruco_start_agl` | 7 m | 1 m | 10 m |
 | `yaw_start_agl` | 5 m | 0,5 m | 10 m |
-| `rtk_agl` | 0,5 m | 0,1 m | 2 m |
+| `rtk_agl` | 0,3 m | 0,1 m | 2 m |
 
-(`aruco_start_agl`-defaulten höjd 5→7 m 2026-08-21 efter Flygtest #6 — se nedan. De två andra
-oförändrade, matchar vad som faktiskt flögs med.)
+(`aruco_start_agl`-defaulten höjd 5→7 m och `rtk_agl` sänkt 0,5→0,3 m, 2026-08-21 efter Flygtest
+#6 — matchar vad som faktiskt flögs med. `yaw_start_agl` oförändrad.)
 
 (Justerat 2026-08-21 från de initiala default/gränserna 15 m / 3,5 m / 0,5 m, max 30/30/3 m —
 snävare intervall bättre anpassade för faktisk flygtestning.)
@@ -355,7 +355,9 @@ snävare intervall bättre anpassade för faktisk flygtestning.)
 
 Tre landningar, 8 m → touchdown, `yaw_align` på (45°/s), `aruco_start_agl` manuellt höjd till 7 m
 under flygningen (rummet vid bänktestet tidigare samma dag var bara ~5,5 m, så tröskeln höjdes för
-att få marginal — se defaultändringen ovan).
+att få marginal — se defaultändringen ovan), `rtk_agl` sänkt till 0,3 m (bekräftat i efterhand
+av alla tre CSV:ers WAIT→RTK-HOLD-övergång, ~0,3 m i samtliga — ursprungligen misstolkat som brus
+runt 0,5 m innan piloten bekräftade det verkliga värdet).
 
 | Inspelning | Dur | Detektion* | Längsta äkta lucka* | Offset konv. | Gir konv. |
 |---|---|---|---|---|---|
