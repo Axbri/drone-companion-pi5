@@ -113,14 +113,17 @@ Steg 3-avsnittet nedan.
 Tryck **● Spela in** i precland-panelen. Fungerar **med eller utan** precland armerat → du kan spela
 in hela flygningen. Sparar synkat i `/home/axel/recordings/`:
 
-- **Video** `.avi` (MJPEG, 640×480, **med CV-overlay** — markör/cirkel, fas, AGL, offset).
+- **Video** `.avi` (MJPEG, 1024×768, **med CV-overlay** — markör, fas, AGL, offset; grön i
+  ARUCO-fasen, röd i WAIT/RTK-HOLD).
 - **Data** `.csv` — **en rad per videoruta** (ruta N ↔ rad N): `t` (epok-tid, exakt), mode, armed,
   roll, pitch, yaw, heading, alt, **agl** (TF-Luna), batteri (V/%), GPS-fix/sats, fas, mål-källa,
-  offset ox/oy, `angle ax/ay` (grader), `sent` (skickades LANDING_TARGET), `scale`, samt
-  `yaw_err_deg`/`yaw_cmd_deg`/`yaw_align` (girinriktning: markörens vinkelfel, den beräknade
-  mål-headingen (grader, oavsett om den faktiskt skickades) och om girinriktning var på för den
-  raden — se avsnittet om girinriktning nedan). CSV:ns `t` är den exakta tidsstämpeln per ruta;
-  video-fps är nominell (~8 Hz på Pi 3A+).
+  offset ox/oy, `angle ax/ay` (grader, kamera-offset-korrigerade — se nedan), `sent` (skickades
+  LANDING_TARGET), `scale`, `yaw_err_deg`/`yaw_cmd_deg`/`yaw_align` (girinriktning: markörens
+  vinkelfel, den beräknade mål-headingen (grader, oavsett om den faktiskt skickades) och om
+  girinriktning var på för den raden), samt `loop_hz`/`latency_ms` (2026-08-24: kontroll-loopens
+  verkliga takt/Pi-latens, EWMA — se avsnittet om inspelningstakt nedan för varför det behövdes).
+  CSV:ns `t` är den exakta tidsstämpeln per ruta; video+CSV skrivs i takt med `ENQUEUE_HZ` (20 Hz,
+  se nedan), inte varje styr-tick.
 
 Ladda ner via **Inspelningar**-panelen (video- + data-länkar) eller `http://dronepi:8080/recordings/<namn>.avi`.
 Radera via ✕ i listan. **Analystips:** plotta CSV (agl vs t = nedstigningsprofil, ox/oy vs t =
@@ -411,8 +414,34 @@ klipps inte bort) till max 60 % av halva VFOV vid given AGL, så korrigeringen t
 istället för att tvinga målet ur bild. Full korrektion ovanför ~0,7 m, ner till ~48 % av full
 korrektion vid RTK-hold-gränsen (0,3 m) — resten av avvikelsen tar RTK-hold hand om ändå.
 
-**EJ omflygtestad efter denna fix** — bygger på samma geometri som redan flygverifierats, men
-själva FOV-klippningen är ny.
+**Omflygtestad 2026-08-24** (28 landningar) — tapern fungerar där den ska: 1,0–1,5 m gick från
+31 %→95 % detektion, 0,6–1,0 m förbättrades också. 0,3–0,6 m fortfarande svagt (0 %→6 %, inte
+löst helt, men RTK-hold tar över där ändå). Högre band (1,5 m+) såg oväntat *sämre* ut än
+tidigare sessioner — tapern rör inget ovanför ~0,7 m så det är sannolikt inte fixen, mer troligt
+skillnaden i flygmönster (28 korta LOITER↔LAND-repetitioner vs enstaka jämna nedstigningar från
+8 m, alltså mer transit-hastighet/rörelseoskärpa genom de högre banden). Ej säkert bekräftat.
+
+## Inspelningstakt och GIL-konkurrens (2026-08-24)
+
+Piloten märkte loop_hz nere på ~15 Hz under vissa flygningar, tillbaka till 40 Hz på bänken med
+markör under kameran. `loop_hz` loggades inte i CSV:n förut — härledd i efterhand ur radtätheten
+i `t`-kolumnen (en rad per styr-tick under inspelning, innan denna fix). Analys av 28 flygningar
+visade motsatsen till den intuitiva förklaringen: **0 % av de snabba (≥25 Hz) sekund-fönstren
+hade en lyckad detektion, mot 39 % av de långsamma** — inte "markör = snabbare" utan tvärtom.
+
+Orsak: under inspelning kringgick writer-tråden tidigare all throttling och körde `annotate()` på
+hela 1024×768-rutan varje styr-tick, obegränsat. `annotate()` gör mer jobb när ett mål faktiskt
+hittas (ritar box/pil/text) — det extra arbetet i writer-tråden konkurrerar om GIL:en med
+kontroll-tråden, vilket förklarar korrelationen. Bänktestet (troligen utan aktiv inspelning) hade
+inte samma writer-belastning, vilket förklarar varför det inte visade samma mönster.
+
+Fix: inspelning throttlas nu till `ENQUEUE_HZ` (20 Hz) precis som live-förhandsvisningen redan
+gjorde, istället för att skriva varje tick obegränsat. Verifierat: `loop_hz` låg stabilt på
+39-40 under en testinspelning (mot 14-21 median i gårdagens data). `loop_hz`/`latency_ms` loggas
+nu explicit i CSV:n (se kolumnlistan ovan) så detta går att följa upp direkt utan att räkna om
+radtätheter. Video/CSV får grövre tidsupplösning (20 Hz istället för upp till 40 Hz) — bedömt
+värt det, eftersom kontroll-loopens takt (som styr själva landningen) spelar större roll än
+inspelningens tidsupplösning.
 
 ## Uppskjutet
 

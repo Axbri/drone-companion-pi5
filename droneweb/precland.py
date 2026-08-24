@@ -259,7 +259,7 @@ YAW_MODES = ("LAND", "RTL")
 REC_DIR = "/home/axel/recordings"
 CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
               "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent,scale,"
-              "yaw_err_deg,yaw_cmd_deg,yaw_align\n")
+              "yaw_err_deg,yaw_cmd_deg,yaw_align,loop_hz,latency_ms\n")
 
 
 def _f(v, nd=3):
@@ -302,6 +302,16 @@ class PrecLandController:
 
     PUSH_HZ = 20                        # live-förhandsvisningens takt (halva RATE_HZ) — sparar bandbredd
     PUSH_SIZE = (CV_W // 2, CV_H // 2)   # halva upplösningen för samma anledning (512x384)
+
+    ENQUEUE_HZ = 20   # takt för BÅDE live-förhandsvisning och inspelning (CSV/AVI) till writer-
+                      # tråden. Inspelning körde tidigare varje tick (40Hz) obegränsat — writer-
+                      # trådens annotate() gör mer jobb när ett mål faktiskt hittas (ritar ut box/
+                      # pil/text), vilket konkurrerar om GIL:en med kontroll-tråden. Uppmätt i
+                      # flygdata 2026-08-24: loop_hz var ALDRIG ≥25Hz i samma sekund som en
+                      # detektion lyckades, konsekvent över 28 flygningar — 0% overlap. Halverad
+                      # inspelningstakt ger grövre tidsupplösning i CSV/AVI men en stabilare
+                      # kontroll-loop (som styr LANDING_TARGET/CONDITION_YAW-takten, vilket spelar
+                      # större roll för landningen än videons tidsupplösning).
 
     def __init__(self, cam, tel, rangefinder=None):
         self.cam, self.tel, self.rf = cam, tel, rangefinder
@@ -463,12 +473,12 @@ class PrecLandController:
         # Gråskala→BGR bara för overlay-färg i förhandsvisning/inspelning (cvtColor
         # GRAY2BGR är en billig kanal-replikering, inte en riktig färgkonvertering —
         # ingen kulörinformation finns kvar att konvertera från sedan färgläget togs bort).
-        # Inspelning behöver varje ruta, men ren tittning (utan inspelning) behöver bara
-        # PUSH_HZ-takten (20) — annars görs konvertering+enqueue i onödan vid 40Hz när
-        # bara halva den takten någonsin visas (drog CPU:n till ~80% i test 2026-08-21).
+        # Både förhandsvisning och inspelning throttlas till ENQUEUE_HZ (se konstanten) —
+        # inspelning körde tidigare varje tick obegränsat, vilket gav writer-tråden
+        # (annotate+skriv) betydligt mer GIL-konkurrens med kontroll-tråden.
         now_ve = time.time()
-        need_video = self._recording or (
-            self.cam.viewers > 0 and now_ve - self._last_enqueue_ts >= 1.0 / self.PUSH_HZ)
+        need_video = (self._recording or self.cam.viewers > 0) and (
+            now_ve - self._last_enqueue_ts >= 1.0 / self.ENQUEUE_HZ)
         if need_video:
             self._last_enqueue_ts = now_ve
         bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR) if need_video else None
@@ -546,7 +556,8 @@ class PrecLandController:
         if need_video and bgr is not None:
             self._enqueue((bgr, target, phase, agl,
                            self._recording, ox, oy, ax_s, ay_s, time.time(),
-                           self.tel.snapshot(), yaw_err_deg, yaw_cmd_deg))
+                           self.tel.snapshot(), yaw_err_deg, yaw_cmd_deg,
+                           self._loop_hz, self._lat_ms))
 
     def _decide_phase(self, agl):
         if agl is None:                        # ingen AGL (t.ex. bänk utan TF-Luna) -> detektera ändå
@@ -583,7 +594,8 @@ class PrecLandController:
                         writer.release(); csvf.close(); writer = csvf = None
                     continue
                 (bgr, target, phase, agl, recording,
-                 ox, oy, ax, ay, t, tel, yaw_err_deg, yaw_cmd_deg) = item
+                 ox, oy, ax, ay, t, tel, yaw_err_deg, yaw_cmd_deg,
+                 loop_hz, lat_ms) = item
 
                 do_push = False
                 if self.cam.viewers > 0:
@@ -609,7 +621,8 @@ class PrecLandController:
                         writer, csvf = self._open_recording()
                     writer.write(out)
                     csvf.write(self._row(t, tel, agl, phase, target,
-                                         ox, oy, ax, ay, yaw_err_deg, yaw_cmd_deg))
+                                         ox, oy, ax, ay, yaw_err_deg, yaw_cmd_deg,
+                                         loop_hz, lat_ms))
                 elif writer is not None:
                     writer.release(); csvf.close(); writer = csvf = None
         finally:
@@ -619,7 +632,7 @@ class PrecLandController:
                 csvf.close()
 
     def _row(self, t, tel, agl, phase, target, ox, oy, ax, ay,
-             yaw_err_deg, yaw_cmd_deg):
+             yaw_err_deg, yaw_cmd_deg, loop_hz, lat_ms):
         sent = phase == PHASE_ARUCO and target is not None
         return ",".join([
             "%.3f" % t, str(tel.get("mode", "")), "1",
@@ -630,7 +643,7 @@ class PrecLandController:
             _f(math.degrees(ax) if ax is not None else None),
             _f(math.degrees(ay) if ay is not None else None), "1" if sent else "0",
             "%.2f" % self._cmd_scale, _f(yaw_err_deg), _f(yaw_cmd_deg),
-            "1" if self._yaw_align else "0",
+            "1" if self._yaw_align else "0", _f(loop_hz, 1), _f(lat_ms, 1),
         ]) + "\n"
 
 
