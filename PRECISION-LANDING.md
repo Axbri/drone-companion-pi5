@@ -394,11 +394,25 @@ Live-justerbar i webben (kortet "Camera calibration", "Camera offset from center
 default -16,5 cm (kroppens X-axel, framåt positivt — kameran sitter alltså på minus). Uppdatera
 om kameran flyttas fysiskt.
 
-**EJ flygverifierad ännu** — tecknet är geometriskt härlett och kontrollräknat (bänk-exempel:
-markör centrerad rakt under kameran på 0,7 m AGL → korrigerad vinkel ≈13° i "målet är bakom
-CG"-riktningen, krymper med höjden), men inte bekräftat med en riktig flygning. Verifiera genom
-att hovra med markören centrerad i bild och se att drönaren kryper åt det håll som centrerar CG
-(inte kameran) över markören — om det blir sämre istället, byt tecken på `CAM_OFFSET_DEFAULT_CM`.
+**Flygverifierad 2026-08-23** — tecknet stämde, ingen justering behövdes (-16,5 cm rätt från start).
+
+### FOV-konflikt nära marken (upptäckt + åtgärdad 2026-08-23)
+
+Pilotens observation: nära marken slutade markören synas, eftersom den (korrekt!) inte längre
+ska vara bildcentrerad utan förskjuten mot bildens ovankant (nos-riktning) när CG är centrerad
+över målet — kameran sitter ju bakom CG. Bekräftat i flygdata: 0 % ArUco-detektion i 0,3–0,6 m
+AGL-bandet (mot 74–100 % innan offset-korrigeringen fanns), 31–67 % i 0,6–1,5 m.
+
+Orsak: vid perfekt CG-centrering måste kameran se målet vid vinkeln atan(0,165/AGL) från
+bildcentrum — det når redan halva VFOV (24,4°) vid AGL ≈ 0,36 m. Under den höjden är det
+geometriskt omöjligt att ha både centrerad CG och målet inom bild. Fix (`_apply_cam_offset()`,
+`CAM_OFFSET_MAX_FOV_FRAC = 0,6`): klipper offseten (inte hela vinkeln — verkligt spårningsfel
+klipps inte bort) till max 60 % av halva VFOV vid given AGL, så korrigeringen tonas ned mjukt
+istället för att tvinga målet ur bild. Full korrektion ovanför ~0,7 m, ner till ~48 % av full
+korrektion vid RTK-hold-gränsen (0,3 m) — resten av avvikelsen tar RTK-hold hand om ändå.
+
+**EJ omflygtestad efter denna fix** — bygger på samma geometri som redan flygverifierats, men
+själva FOV-klippningen är ny.
 
 ## Uppskjutet
 

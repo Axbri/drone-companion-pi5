@@ -72,6 +72,15 @@ CMD_SCALE_DEFAULT = 1.0
 CAM_OFFSET_DEFAULT_CM = -16.5
 CAM_OFFSET_MIN_CM, CAM_OFFSET_MAX_CM = -30.0, 30.0
 
+# Nära marken kräver full offset-korrigering att markören syns nära/utanför bildkanten
+# (bekräftat i flygdata 2026-08-23: 0% ArUco-detektion 0,3-0,6 m AGL med -16,5 cm —
+# vid perfekt CG-centrering måste kameran då se målet vid atan(0,165/agl) ≈ ≥24° från
+# bildcentrum, vilket redan är halva VFOV på ~0,36 m). En "perfekt" korrigering som
+# tappar målet är sämre än en delvis korrigering som behåller spårningen (RTK-hold tar
+# ändå hand om den sista resten). Håller korrigeringen inom en säker andel av halva
+# VFOV, oavsett verkligt spårningsfel också bidrar till samma bildkant.
+CAM_OFFSET_MAX_FOV_FRAC = 0.6   # andel av halva VFOV som korrigeringen ensam får kräva
+
 
 def _apply_cam_offset(ax, ay, agl, offset_fwd_m):
     """Räknar om målets siktlinjevinkel (uppmätt från KAMERAN) till motsvarande vinkel
@@ -84,9 +93,15 @@ def _apply_cam_offset(ax, ay, agl, offset_fwd_m):
     (fram, höger, ned) = agl * (-tan(ay), tan(ax), 1) — se kommentaren om
     AC_PrecLand_MAVLink::handle_msg() ovan för samma konvention. Lägg till kamerans
     kända position rel. CG (offset_fwd_m, 0, 0) för att få målets position rel. CG,
-    och räkna om till vinkel med samma konvention."""
+    och räkna om till vinkel med samma konvention.
+
+    offset_fwd_m klipps (inte den slutliga vinkeln — verkligt spårningsfel ska inte
+    klippas bort) till max CAM_OFFSET_MAX_FOV_FRAC av halva VFOV vid given agl, så
+    korrigeringen tonas ned mjukt nära marken istället för att tvinga målet ur bild."""
     if agl is None or agl <= 0 or offset_fwd_m == 0.0:
         return ax, ay
+    max_offset_m = agl * math.tan(CAM_OFFSET_MAX_FOV_FRAC * math.radians(VFOV_DEG / 2.0))
+    offset_fwd_m = math.copysign(min(abs(offset_fwd_m), max_offset_m), offset_fwd_m)
     fwd_cam = -math.tan(ay) * agl
     right_cam = math.tan(ax) * agl
     fwd_cg = fwd_cam + offset_fwd_m
