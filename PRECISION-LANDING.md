@@ -111,7 +111,11 @@ Steg 3-avsnittet nedan.
 ## Inspelning (för fältanalys i efterhand)
 
 Tryck **● Spela in** i precland-panelen. Fungerar **med eller utan** precland armerat → du kan spela
-in hela flygningen. Sparar synkat i `/home/axel/recordings/`:
+in hela flygningen. Sparar synkat i `/home/axel/recordings/`.
+
+**Stoppas automatiskt vid disarm** (2026-08-24, kant-triggat på FC:ns armed-status True→False,
+inte "är för tillfället disarmerad" — annars skulle bänktest utan armerad FC vara omöjligt att
+spela in). Glöm inte kvar en inspelning igång längre än så.
 
 - **Video** `.avi` (MJPEG, 1024×768, **med CV-overlay** — markör, fas, AGL, offset; grön i
   ARUCO-fasen, röd i WAIT/RTK-HOLD).

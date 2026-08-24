@@ -317,6 +317,7 @@ class PrecLandController:
         self.cam, self.tel, self.rf = cam, tel, rangefinder
         self.det = PrecLandDetector()
         self._recording = False
+        self._last_armed = False   # för att detektera disarm (True→False), inte bara "är disarmerad"
         self._tx = 0
         self._q = queue.Queue(maxsize=self._Q_MAX)
         self._last_push_ts = 0.0
@@ -463,6 +464,16 @@ class PrecLandController:
         gray = yuv[:CV_H, :CV_W]
         agl = self.rf.agl() if self.rf else None
         phase = self._decide_phase(agl)
+
+        # Stoppa inspelning automatiskt vid disarm (kant-triggat: bara True→False, inte
+        # "är för tillfället disarmerad" — annars skulle det aldrig gå att spela in på
+        # bänken utan att drönaren är armerad). _last_armed initieras False så första
+        # riktiga läsningen aldrig ger ett falskt larm innan telemetri kommit in.
+        armed_now = self.tel.snapshot().get("armed")
+        if self._last_armed and armed_now is False and self._recording:
+            self.stop_recording()
+        if armed_now is not None:
+            self._last_armed = armed_now
 
         # Detekterar alltid, oavsett fas (även WAIT/RTK-HOLD) — för räckviddstest (kan
         # den se markören högre upp / lägre ner än de aktiva trösklarna?). Sändning är
