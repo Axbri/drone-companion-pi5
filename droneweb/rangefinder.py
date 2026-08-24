@@ -50,9 +50,16 @@ class RangeFinder:
                 with self._lock:
                     self._dist_m = (cm / 100.0) if valid else None
                     self._ok = True
+                # Reläa alltid, även vid ogiltig läsning (för svag/mättad/utanför räckvidd) —
+                # annars tystnar vi i flera sekunder när TF-Luna tappar en giltig träff (vanligt
+                # utomhus). ArduPilots AP_RangeFinder_MAVLink har en hård 500ms-timeout: ingen
+                # DISTANCE_SENSOR inom 500ms → NoData → "Bad LiDAR Health". En ogiltig läsning
+                # skickas som "utanför räckvidd" (> MAX_CM) istället för tystnad — ger korrekt
+                # OutOfRangeHigh-status i ArduPilot, ingen falsk hälsovarning, och ingen påhittad
+                # distans (send_distance_sensor(..., MAX_CM) skickas ändå, så FC:n vet gränsen).
                 now = time.time()
-                if self.tel and valid and now - last_relay >= self._relay_dt:
-                    self.tel.send_distance_sensor(cm, MIN_CM, MAX_CM)
+                if self.tel and now - last_relay >= self._relay_dt:
+                    self.tel.send_distance_sensor(cm if valid else MAX_CM + 1, MIN_CM, MAX_CM)
                     last_relay = now
                 time.sleep(0.05)
             except Exception:
