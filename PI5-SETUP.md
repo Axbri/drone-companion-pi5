@@ -124,6 +124,22 @@ Confirm the drone reaches `homebase:2101` over the tailnet.
   (`FPS` in `camera.py`, now 40) ≈ the achieved loop rate, `buffer_count=1` (2 caused backlog on Pi 5
   at 40Hz — see camera.py comments). Measured on the bench 2026-08-18: ~19-21ms @ ~40Hz, stable.
 
+## Systemklocka — ingen RTC-batteri (2026-08-25)
+
+Pi 5:ns inbyggda RTC (`/dev/rtc0`) har **ingen batteribackup installerad** på denna enhet — vid
+varje kallstart nollställs den till Unix-epok (`setting system clock to 1970-01-01T00:00:15`).
+Klockan förlitar sig alltså helt på NTP efter varje boot. Uppmätt en gång: NTP tog **20+ timmar**
+att lyckas synka (Pi:n var på hemma-WiFi hela tiden, orsaken ospårad — trolig långsam
+retry-backoff/opålitlig pool-server, inte fel nätverk). Under tiden är alla tidsstämplar
+(loggar, inspelningsfilnamn) opålitliga.
+
+**Fix:** `mavlink.py` sätter systemklockan från FC:ns GPS-tid (`SYSTEM_TIME.time_unix_usec`,
+ArduPilot fyller i den från GPS vid fix) som fallback — kräver 3D-fix + ett rimlighetstest, och
+rör ALDRIG klockan om NTP redan har synkat (`/run/systemd/timesync/synchronized` finns). GPS-tid
+är alltid tillgänglig i fält, oberoende av server/nätverk. Kräver `sudo date -s @*` i
+`droneweb.sudoers` (installerad). Permanent fix vore en RTC-batteri (liten knappcell på Pi 5:ans
+RTC-kontakt) — inte gjort än, GPS-fallbacken täcker behovet under flygning.
+
 ## FC params (Cube — for reference; verify live, this file is a snapshot)
 `PLND_ENABLED=1, PLND_TYPE=1, PLND_EST_TYPE=1` (Kalman, switched from raw 2026-08-18),
 `PLND_LAG=0.025` (25ms — lowered from 0.25 to match the Pi 5's measured ~20ms pipeline latency

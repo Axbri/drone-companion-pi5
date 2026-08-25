@@ -8,6 +8,8 @@ skicka LANDING_TARGET till FC:n (mavproxy forwardar companion→master).
 Trådsäker: en bakgrundstråd uppdaterar `self.data`; `snapshot()` läser en kopia.
 """
 import math
+import os
+import subprocess
 import threading
 import time
 
@@ -16,6 +18,17 @@ from pymavlink import mavutil
 DEFAULT_URL = "udpout:127.0.0.1:14551"
 ATTITUDE_HZ = 20   # HUD smoothness — ArduPilot's default ATTITUDE stream rate is
                    # only ~4Hz; the 921600 baud FC link has plenty of headroom for this.
+
+# ---- systemklocka från FC:ns GPS-tid (fallback, ingen RTC-batteri på Pi:n) ---------
+# Pi 5:ns inbyggda RTC har ingen batteribackup här → startar alltid om från noll (epok),
+# och NTP kan dröja mycket längre än förväntat i fält (uppmätt: 20+ timmar en gång, se
+# PI5-SETUP.md). GPS-tid från FC:n är alltid tillgänglig under flygning och beror inte
+# på en server. SYSTEM_TIME.time_unix_usec sätts av ArduPilot från GPS när den har fix —
+# vi litar bara på den vid 3D-fix + ett rimlighetstest, och rör ALDRIG klockan om NTP
+# redan har synkat (då är NTP mer exakt och får vara auktoritativ).
+GPS_TIME_MIN_EPOCH = 1735689600.0   # 2025-01-01 UTC — allt tidigare är uppenbart fel
+GPS_TIME_SET_INTERVAL_S = 30        # hur ofta vi försöker, inte varje SYSTEM_TIME-meddelande
+NTP_SYNCED_FLAG = "/run/systemd/timesync/synchronized"   # skapas av timesyncd efter lyckad sync
 
 # ---- mission/fence/rally download (MAVLink mission protocol), för Map-fliken --------
 FC_SYS, FC_COMP = 1, 1          # ArduPilot FC:s standard sysid/compid
@@ -37,6 +50,7 @@ class MavlinkTelemetry:
         self._mission = {"version": 0, "items": [], "jumps": [], "fence": [], "rally": []}
         self._mdl = {"active": False, "mtype": 0, "count": -1, "items": {},
                      "last_req": 0.0, "tries": 0}
+        self._last_gps_time_set = 0.0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -144,10 +158,39 @@ class MavlinkTelemetry:
             d["lon"] = msg.lon / 1e7
         elif t == "MISSION_CURRENT":
             d["cur_wp"] = msg.seq
+        elif t == "SYSTEM_TIME":
+            self._maybe_set_clock_from_gps(msg.time_unix_usec)
         if d:
             with self._lock:
                 self._data.update(d)
                 self._data["updated"] = round(time.time(), 1)
+
+    def _maybe_set_clock_from_gps(self, time_unix_usec):
+        """Sätter Pi:ns systemklocka från FC:ns GPS-tid — fallback när NTP inte har
+        synkat än (ingen RTC-batteri på denna Pi, se PI5-SETUP.md). Rör ALDRIG klockan
+        om NTP redan har synkat (då är NTP mer exakt och auktoritativ). Kräver GPS
+        3D-fix + ett rimlighetstest mot en fast datumgräns, som skydd mot uppenbart
+        trasiga värden innan FC:n har en riktig fix."""
+        now = time.time()
+        if now - self._last_gps_time_set < GPS_TIME_SET_INTERVAL_S:
+            return
+        if os.path.exists(NTP_SYNCED_FLAG):
+            return
+        with self._lock:
+            fix_type = self._data.get("fix_type", 0)
+        if fix_type < 3:
+            return
+        epoch = time_unix_usec / 1e6
+        if epoch < GPS_TIME_MIN_EPOCH:
+            return
+        self._last_gps_time_set = now
+        try:
+            subprocess.run(["sudo", "-n", "date", "-s", "@%.0f" % epoch],
+                           timeout=5, check=True, capture_output=True)
+            print(f"[mavlink] Satte systemklockan från GPS-tid (fix_type={fix_type}): "
+                  f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(epoch))}")
+        except Exception as e:
+            print(f"[mavlink] VARNING: kunde inte sätta klockan från GPS-tid: {e}")
 
     # ---- mission/fence/rally-nedladdning ---------------------------------
     def read_mission(self):

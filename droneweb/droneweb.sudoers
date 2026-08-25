@@ -7,3 +7,6 @@ axel ALL=(root) NOPASSWD: /sbin/shutdown
 # Nätverks-testknapp: tvinga 4G genom att slå av/på WiFi-radion.
 axel ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi on
 axel ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi off
+# Sätt systemklockan från FC:ns GPS-tid (ingen RTC-batteri installerad — se mavlink.py).
+# "date -s @*" tar bara ett epoktal, inget skal/injektionsutrymme.
+axel ALL=(root) NOPASSWD: /usr/bin/date -s @*
