@@ -6,6 +6,14 @@ const setText = (sel, text) => document.querySelectorAll(sel).forEach((el) => (e
 
 const FIX = { 0: "None", 1: "No fix", 2: "2D", 3: "3D", 4: "DGPS", 5: "RTK-Float", 6: "RTK-Fixed" };
 
+// ---- clock (Pi's own system clock, not the browser's) -----------------------
+async function pollClock() {
+  try {
+    const t = await (await fetch("/api/time", { cache: "no-store" })).json();
+    $("clock").textContent = t.time;
+  } catch (e) {}
+}
+
 // ---- telemetry (~10 Hz) -----------------------------------------------------
 async function pollTelemetry() {
   try {
@@ -933,6 +941,7 @@ tabBtns.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab))
 showTab(localStorage.getItem("activeTab") || "pilot");
 if (hudOn) drawHud("hud-pilot", 0, 0, 0);
 drawADI("adi-precland", 0, 0);
+pollClock(); setInterval(pollClock, 1000);
 pollTelemetry(); setInterval(pollTelemetry, 100);   // 10Hz — HUD smoothness (see ATTITUDE_HZ in mavlink.py)
 pollStats(); setInterval(pollStats, 1000);
 pollPrecland(); setInterval(pollPrecland, 500);

@@ -41,6 +41,7 @@ header {
   color: var(--muted);
   white-space: nowrap;
 }
+#clock { font-variant-numeric: tabular-nums; }
 .pill-good { color: var(--good); border-color: var(--good); }
 .pill-bad { color: var(--bad); border-color: var(--bad); }
 .pill-warn { color: var(--warn); border-color: var(--warn); }

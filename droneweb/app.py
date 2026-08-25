@@ -63,6 +63,13 @@ def api_telemetry():
     return jsonify(tel.snapshot())
 
 
+@app.route("/api/time")
+def api_time():
+    # Pi:ns egen systemklocka (inte webbläsarens) — den som styr filnamn/loggar,
+    # och en löpande synlig kontroll efter GPS-tid-fallbacken (mavlink.py).
+    return jsonify({"time": time.strftime("%Y-%m-%d %H:%M:%S")})
+
+
 @app.route("/api/mission")
 def api_mission():
     return jsonify(tel.mission_snapshot())
