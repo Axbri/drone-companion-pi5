@@ -22,7 +22,7 @@ from rangefinder import RangeFinder
 from rtk import RtkMonitor
 
 app = Flask(__name__)
-cam = Camera()        # imx219 — spårningskamera (alltid på, se camera.py)
+cam = Camera()        # imx296 — spårningskamera (alltid på, se camera.py)
 hq_cam = HQCamera()   # imx477 — Pilot view FPV stream only
 tel = MavlinkTelemetry()
 rf = RangeFinder(tel)   # alltid på: reläar TF-Luna DISTANCE_SENSOR till FC från boot (lätt, ingen cv2)

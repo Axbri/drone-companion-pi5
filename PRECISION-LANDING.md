@@ -1,8 +1,18 @@
 # Precisionslandning (Steg 2)
 
-Tvåfas-visuell precisionslandning inbyggd i **droneweb**: den nedåtriktade IMX219-kameran ser
+Tvåfas-visuell precisionslandning inbyggd i **droneweb**: den nedåtriktade kameran (IMX296 sedan 2026-09-14, tidigare IMX219) ser
 landningsplattan, Pi:n skickar `LANDING_TARGET` till ArduPilot, och bildanalys-grafiken visas i
 webbgränssnittet. Bygger på Steg 1 ([`WEB-INTERFACE.md`](WEB-INTERFACE.md)).
+
+> **Camera swap (2026-09-14, NOT yet flight-tested):** the downward IMX219 is replaced by an
+> **IMX296** (Raspberry Pi Global Shutter Camera, mono, 1456x1088, wide-angle CS lens).
+> `camera.py` looks it up by model `imx296`; CV resolution stays 1024x768 (ISP-scaled, full
+> FOV). Focal length measured on the bench (14.5 cm marker at 94 cm → 100.4 px) →
+> `F_PX = 651` (HFOV 76°, VFOV 61°; IMX219 was 848 px / 62°/49°). Consequences: the marker is
+> ~23% smaller in pixels at a given AGL, so ArUco detection range drops (~7 m → ~5.5 m for the
+> 0.30 m marker); check the "Camera calibration" card in flight (f_meas should be ≈651) and
+> lower `aruco_start_agl` if detection is unreliable at 7 m. Camera offset (-16.5 cm) kept —
+> mounted in the same spot. Bench: loop ~40 Hz, latency ~28 ms with fixed exposure.
 
 > **Status (2026-08-20):** flygverifierad, fungerar bra. Snabb och exakt korrektion så fort
 > drönaren kommer ner på rätt höjd och ser plattan, ingen översläng, styrskala=1.0. Verifierat

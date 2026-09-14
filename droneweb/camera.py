@@ -1,4 +1,11 @@
-"""IMX219-kamera via picamera2 för droneweb — alltid-på spårningskamera (Steg 3).
+"""IMX296 camera (Raspberry Pi Global Shutter, mono) via picamera2 for droneweb —
+always-on tracking camera (Steg 3).
+
+Change 2026-09-14: IMX219 (rolling shutter, colour) replaced by IMX296 (global
+shutter, mono, 1456x1088 @ max 60 fps, a single sensor mode). Global shutter = no
+rolling-shutter skew of the marker under vibration/rotation; mono = the Y plane is
+the sensor's real pixels (no Bayer interpolation). The lens is interchangeable
+(C/CS mount) → FOV/focal length in precland.py MUST be recalibrated on a lens change.
 
 Änd 2026-08-21: den separata rå-FPV-vyn (HW-MJPEG, för att bara titta på den
 nedåtriktade kameran) är borttagen — den var bara till för att experimentera med
@@ -13,15 +20,17 @@ import threading
 
 from picamera2 import Picamera2
 
-SENSOR_MODEL = "imx219"   # precland-kameran; Pi 5 har numera även en imx477 (12MP) på den
-                          # andra CSI-porten — Picamera2() utan argument tar Num 0, vilket INTE
-                          # längre är garanterat imx219, så vi slår upp rätt kamera via modellnamn.
+SENSOR_MODEL = "imx296"   # precland camera; the Pi 5 also has an imx477 (12MP, FPV) on the other
+                          # CSI port — Picamera2() without an argument takes Num 0, which is not
+                          # guaranteed to be the right camera, so look it up by model name.
 
-CAPTURE_SIZE = (1024, 768)   # 4:3, full FOV (IMX219 är 4:3). Höjd från 640x480 2026-08-21 för
-                              # längre ArUco-räckvidd (Pi 5 har gott om marginal jämfört med Pi 3A+
-                              # som satte den gamla gränsen) — se PRECISION-LANDING.md.
-FPS = 40                      # Pi 5-tuning 2026-08-18, se PI5-SETUP.md. EJ omverifierat vid den
-                              # högre upplösningen (2026-08-21) — kontrollera loop_hz i webben.
+CAPTURE_SIZE = (1024, 768)   # ISP downscales from the sensor's 1456x1088 (ScalerCrop 3,0,1450,1088 =
+                              # full FOV). Kept from the IMX219 era: bench 2026-09-14 gave ArUco
+                              # detection 46 ms/frame here (~15 Hz loop, same as the 2026-08-24
+                              # flight log) vs 71 ms (~11 Hz) at native 1456x1088 — the range gain
+                              # from full resolution does not justify the loop-rate drop.
+FPS = 40                      # sensor does 60; 40 is plenty since the CV loop runs ~15 Hz and
+                              # buffer_count=1 hands out the freshest frame anyway.
 
 
 class StreamingOutput(io.BufferedIOBase):

@@ -34,12 +34,20 @@ import numpy as np
 ARUCO_DICT = cv2.aruco.DICT_4X4_50
 ARUCO_ID = 0
 
-# IMX219 full-FOV vid CV-upplösningen (approx; förfinas med kalibrering). Höjd från
-# 640x480 2026-08-21 för längre ArUco-räckvidd (Pi 5-marginal) — se modul-docstring.
+# Camera model at the CV resolution (camera.py CAPTURE_SIZE; ISP scales the sensor's
+# full FOV to this, square pixels). Resolution raised from 640x480 2026-08-21 for
+# longer ArUco range (Pi 5 margin) — see module docstring.
+# 2026-09-14: IMX219 replaced by IMX296 (global shutter, mono) with a wide-angle CS
+# lens. F_PX measured on the bench: 14.5 cm marker at 94 cm → 100.4 px side at
+# 1024x768 → f = 100.4 * 0.94 / 0.145 ≈ 651 px (HFOV ≈ 76°, VFOV ≈ 61°; IMX219 was
+# 62°/49°). Measured near image centre — lens distortion at the edges is not
+# modelled. Re-measure (web "Camera calibration" card, f_meas vs assumed_f) if the
+# lens is changed or refocused. (IMX219 model was HFOV 62.2 / VFOV 48.8 → f ≈ 848 px.)
 CV_W, CV_H = 1024, 768
-HFOV_DEG, VFOV_DEG = 62.2, 48.8
-FX = (CV_W / 2) / math.tan(math.radians(HFOV_DEG) / 2)
-FY = (CV_H / 2) / math.tan(math.radians(VFOV_DEG) / 2)
+F_PX = 651.0
+FX = FY = F_PX
+HFOV_DEG = math.degrees(2 * math.atan((CV_W / 2) / FX))
+VFOV_DEG = math.degrees(2 * math.atan((CV_H / 2) / FY))
 CX, CY = CV_W / 2.0, CV_H / 2.0
 
 # Kamerakalibrering: ArUco-markörens verkliga sidlängd (svarta fyrkanten), meter.

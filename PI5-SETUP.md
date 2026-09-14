@@ -26,6 +26,7 @@ Prefix remote python one-liners with `MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1
 2. Boot, confirm it joins WiFi, note its IP (or try `dronepi5.local`).
 3. **Hardware move (Pi 5 differences!):**
    - **Camera:** IMX219 needs a **Pi 5 camera cable (22-pin → 15-pin)** — old one won't fit.
+     (2026-09-14: precland camera is now an **IMX296** Global Shutter mono on the same port; imx477 = FPV.)
    - **Power:** Pi 5 draws up to ~5 V/5 A under load — **verify the BEC can supply it** (else brownout in flight).
    - **TF-Luna:** same I2C — SDA→pin3 (GPIO2), SCL→pin5 (GPIO3), 5V, GND. Sensor pin5→GND = I2C mode.
    - **4G dongle (SIM7600E-H):** any USB port.
@@ -63,7 +64,7 @@ enable_uart=1
   `do_serial_cons 1`, or remove `console=serial0,...` from `/boot/firmware/cmdline.txt`. Verify no
   `console=serial` remains.
 - **I2C module:** `echo i2c-dev | sudo tee /etc/modules-load.d/i2c.conf`
-- Reboot. Verify: `ls /dev/i2c-1`, `ls /dev/serial0`, `rpicam-hello --list-cameras` shows imx219.
+- Reboot. Verify: `ls /dev/i2c-1`, `ls /dev/serial0`, `rpicam-hello --list-cameras` shows imx296 (precland) and imx477 (FPV).
 
 ### 3. droneweb app + venv
 ```bash
