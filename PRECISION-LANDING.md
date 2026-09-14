@@ -5,14 +5,15 @@ landningsplattan, Pi:n skickar `LANDING_TARGET` till ArduPilot, och bildanalys-g
 webbgränssnittet. Bygger på Steg 1 ([`WEB-INTERFACE.md`](WEB-INTERFACE.md)).
 
 > **Camera swap (2026-09-14, NOT yet flight-tested):** the downward IMX219 is replaced by an
-> **IMX296** (Raspberry Pi Global Shutter Camera, mono, 1456x1088, wide-angle CS lens).
-> `camera.py` looks it up by model `imx296`; CV resolution stays 1024x768 (ISP-scaled, full
-> FOV). Focal length measured on the bench (14.5 cm marker at 94 cm → 100.4 px) →
-> `F_PX = 651` (HFOV 76°, VFOV 61°; IMX219 was 848 px / 62°/49°). Consequences: the marker is
-> ~23% smaller in pixels at a given AGL, so ArUco detection range drops (~7 m → ~5.5 m for the
-> 0.30 m marker); check the "Camera calibration" card in flight (f_meas should be ≈651) and
-> lower `aruco_start_agl` if detection is unreliable at 7 m. Camera offset (-16.5 cm) kept —
-> mounted in the same spot. Bench: loop ~40 Hz, latency ~28 ms with fixed exposure.
+> **IMX296** (Raspberry Pi Global Shutter Camera, mono, wide-angle CS lens). `camera.py` looks it
+> up by model `imx296` and runs it at native **1456x1088** (CV resolution too). Focal length
+> measured on the bench (14.5 cm marker at 94 cm → 142.7 px) → `F_PX = 925` (HFOV 76°,
+> VFOV 61°; IMX219 was 848 px at 1024x768, 62°/49°) — so the marker pixel size at a given AGL
+> is about the same as before, with a wider FOV. Cost: ArUco detect 17.6 ms/frame on the bench
+> (vs 8.6 ms at 1024x768); expect ~8–12 Hz outdoors instead of ~15 — check `loop_hz` in the
+> flight CSV, and check the "Camera calibration" card in flight (f_meas should be ≈925). Fallback
+> if too slow: `CAPTURE_SIZE`/`CV_W,CV_H` = 1024x768 with `F_PX = 651`. Camera offset
+> (-16.5 cm) kept — mounted in the same spot.
 
 > **Status (2026-08-20):** flygverifierad, fungerar bra. Snabb och exakt korrektion så fort
 > drönaren kommer ner på rätt höjd och ser plattan, ingen översläng, styrskala=1.0. Verifierat

@@ -34,17 +34,16 @@ import numpy as np
 ARUCO_DICT = cv2.aruco.DICT_4X4_50
 ARUCO_ID = 0
 
-# Camera model at the CV resolution (camera.py CAPTURE_SIZE; ISP scales the sensor's
-# full FOV to this, square pixels). Resolution raised from 640x480 2026-08-21 for
-# longer ArUco range (Pi 5 margin) — see module docstring.
-# 2026-09-14: IMX219 replaced by IMX296 (global shutter, mono) with a wide-angle CS
-# lens. F_PX measured on the bench: 14.5 cm marker at 94 cm → 100.4 px side at
-# 1024x768 → f = 100.4 * 0.94 / 0.145 ≈ 651 px (HFOV ≈ 76°, VFOV ≈ 61°; IMX219 was
-# 62°/49°). Measured near image centre — lens distortion at the edges is not
-# modelled. Re-measure (web "Camera calibration" card, f_meas vs assumed_f) if the
-# lens is changed or refocused. (IMX219 model was HFOV 62.2 / VFOV 48.8 → f ≈ 848 px.)
-CV_W, CV_H = 1024, 768
-F_PX = 651.0
+# Camera model at the CV resolution (= camera.py CAPTURE_SIZE). 2026-09-14: IMX219
+# replaced by IMX296 (global shutter, mono) with a wide-angle CS lens, run at its native
+# 1456x1088 (see camera.py for the resolution trade-off). F_PX measured on the bench:
+# 14.5 cm marker at 94 cm → 142.7 px side → f = 142.7 * 0.94 / 0.145 ≈ 925 px
+# (HFOV ≈ 76°, VFOV ≈ 61°). Measured near image centre — lens distortion at the edges
+# is not modelled. Re-measure (web "Camera calibration" card, f_meas vs assumed_f) if
+# the lens is changed or refocused. Previous: IMX219 at 1024x768, HFOV 62.2 / VFOV
+# 48.8 → f ≈ 848 px; the IMX296 at 1024x768 (ISP-scaled) measured f = 651 px.
+CV_W, CV_H = 1456, 1088
+F_PX = 925.0
 FX = FY = F_PX
 HFOV_DEG = math.degrees(2 * math.atan((CV_W / 2) / FX))
 VFOV_DEG = math.degrees(2 * math.atan((CV_H / 2) / FY))
@@ -309,7 +308,7 @@ class PrecLandController:
                                     # auto_yaw rampar själv kontinuerligt mellan uppdateringarna
 
     PUSH_HZ = 20                        # live-förhandsvisningens takt (halva RATE_HZ) — sparar bandbredd
-    PUSH_SIZE = (CV_W // 2, CV_H // 2)   # halva upplösningen för samma anledning (512x384)
+    PUSH_SIZE = (CV_W // 2, CV_H // 2)   # halva upplösningen för samma anledning (728x544)
 
     ENQUEUE_HZ = 20   # takt för BÅDE live-förhandsvisning och inspelning (CSV/AVI) till writer-
                       # tråden. Inspelning körde tidigare varje tick (40Hz) obegränsat — writer-
@@ -623,7 +622,7 @@ class PrecLandController:
                         self._last_push_ts = now
                         do_push = True
 
-                # annotate() ritar på hela 1024x768-rutan — bara värt kostnaden om den
+                # annotate() ritar på hela CV_W x CV_H-rutan — bara värt kostnaden om den
                 # faktiskt ska visas (do_push) eller sparas (recording), inte annars
                 # (t.ex. en enqueue som bara nådde tröskeln pga inspelning medan preview-
                 # takten redan har sin egen frame nyss).

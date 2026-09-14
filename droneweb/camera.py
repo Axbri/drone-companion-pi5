@@ -24,13 +24,15 @@ SENSOR_MODEL = "imx296"   # precland camera; the Pi 5 also has an imx477 (12MP, 
                           # CSI port — Picamera2() without an argument takes Num 0, which is not
                           # guaranteed to be the right camera, so look it up by model name.
 
-CAPTURE_SIZE = (1024, 768)   # ISP downscales from the sensor's 1456x1088 (ScalerCrop 3,0,1450,1088 =
-                              # full FOV). Kept from the IMX219 era: bench 2026-09-14 gave ArUco
-                              # detection 46 ms/frame here (~15 Hz loop, same as the 2026-08-24
-                              # flight log) vs 71 ms (~11 Hz) at native 1456x1088 — the range gain
-                              # from full resolution does not justify the loop-rate drop.
-FPS = 40                      # sensor does 60; 40 is plenty since the CV loop runs ~15 Hz and
-                              # buffer_count=1 hands out the freshest frame anyway.
+CAPTURE_SIZE = (1456, 1088)  # native IMX296 (single sensor mode, full FOV, mono). Bench 2026-09-14
+                              # with the flight exposure (2000 us, gain 2): ArUco detect 17.6 ms/frame
+                              # here vs 8.6 ms at 1024x768 — both hit the 40 Hz cap indoors; expect
+                              # ~8-12 Hz outdoors on grass (1024x768 flew at ~15 Hz). Chosen for
+                              # range: f ~= 925 px, same marker pixel size as the IMX219 gave at
+                              # 1024x768, on top of the wider FOV. Fall back to (1024, 768) if loop_hz
+                              # in the flight CSV is too low (then F_PX in precland.py = 651).
+FPS = 40                      # sensor does 60; 40 is plenty since the CV loop is slower than that
+                              # and buffer_count=1 hands out the freshest frame anyway.
 
 
 class StreamingOutput(io.BufferedIOBase):
