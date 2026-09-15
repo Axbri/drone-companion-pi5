@@ -489,11 +489,24 @@ Six landings analysed (`rec_20260915_183127` … `184145`, 3× LAND, 3× RTL, al
 
 No code or parameter changes needed.
 
-## Uppskjutet
+## Lens calibration — IMX296 fisheye (2026-09-15, not yet flight-tested)
 
-- **Kamerakalibrering (IMX296 fisheye)** — cv2 fisheye/pinhole calibration with a chessboard,
-  undistort (or `undistortPoints` on the ArUco corners only, cheap) so the angle→target mapping
-  is correct at the image edges, where the wide FOV now actually finds the marker.
+Tools in `camera-calibration/`: `calib_board.py` (A4 ChArUco board, 7x5, DICT_5X5_100),
+`calib_capture.py` (auto-captures views on the Pi with a live overlay at :8081, droneweb stopped),
+`calib_solve.py` (fits OpenCV fisheye and pinhole, keeps the better, writes JSON). Result from
+80 views, printed square 32 mm: **fisheye (Kannala-Brandt), RMS 0.25 px**, f = 976 px, principal
+point (695, 527) — i.e. 33 px left / 17 px above the image centre — effective FOV **93° × 67°**.
+The pinhole model could not fit at all (RMS 2.3 px, f → 6000), so the lens is genuinely fisheye.
+
+`droneweb/camera_calib_imx296.json` is loaded by `precland.CameraModel`; only the ArUco centre
+and corners are undistorted (`fisheye.undistortPoints`, ~60 µs/frame), the image itself is not.
+Fallback to the `F_PX` pinhole when the file is missing or a point diverges (>70° off-axis).
+Effect vs the old pinhole: a fixed ~2°/1° bias from the principal-point offset is gone, and at the
+image edges the bearing was 9° too small (36° vs 45° at the right edge) — exactly where the wide
+lens now acquires markers 3 m off at 8 m AGL. Redo the capture+solve if the lens is moved or
+refocused (`square` = measured square size).
+
+## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
 - **TF-Luna AGL=None en stor del av flygningen** (se Flygtest #6) — varför, och går det åtgärda?
   Höjdgrindningen (WAIT/RTK-HOLD) är inaktiv (faller till "detektera ändå") när det händer.

@@ -21,6 +21,7 @@ i PrecLandController (denna modul); AGL kommer från rangefinder.py.
 
 Modulen är fristående testbar:  python precland.py <bild> [målstorlek_px]
 """
+import json
 import math
 import os
 import queue
@@ -42,12 +43,70 @@ ARUCO_ID = 0
 # is not modelled. Re-measure (web "Camera calibration" card, f_meas vs assumed_f) if
 # the lens is changed or refocused. Previous: IMX219 at 1024x768, HFOV 62.2 / VFOV
 # 48.8 → f ≈ 848 px; the IMX296 at 1024x768 (ISP-scaled) measured f = 651 px.
+# With camera_calib_imx296.json present (the normal case since 2026-09-15) this pinhole
+# is only the fallback and the reference frame for rectified pixel quantities (px_size,
+# calibration card): angles come from the fisheye model in CameraModel below.
 CV_W, CV_H = 1456, 1088
 F_PX = 925.0
 FX = FY = F_PX
 HFOV_DEG = math.degrees(2 * math.atan((CV_W / 2) / FX))
 VFOV_DEG = math.degrees(2 * math.atan((CV_H / 2) / FY))
 CX, CY = CV_W / 2.0, CV_H / 2.0
+
+# Lens calibration (camera-calibration/calib_solve.py output). When present, ArUco points
+# are undistorted through it (fisheye or pinhole+distortion) before angles are computed,
+# so the target bearing is right out at the image edges where the wide lens is far from
+# a pinhole. Without the file the plain F_PX pinhole above is used.
+MAX_NORM = math.tan(math.radians(70))   # |x/z| beyond 70° off-axis = model diverged
+CALIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camera_calib_imx296.json")
+
+
+class CameraModel:
+    """Pixel → normalised camera coordinates (x/z, y/z), calibrated or plain pinhole."""
+
+    def __init__(self, path=CALIB_PATH):
+        self.K = self.D = None
+        self.fisheye = False
+        self.desc = f"uncalibrated pinhole F_PX={F_PX:.0f}"
+        try:
+            with open(path) as f:
+                c = json.load(f)
+            if tuple(c["size"]) != (CV_W, CV_H):
+                raise ValueError(f"calibration size {c['size']} != CV {CV_W}x{CV_H}")
+            self.K = np.array(c["K"], np.float64)
+            self.D = np.array(c["D"], np.float64)
+            self.fisheye = c["model"] == "fisheye"
+            self.desc = (f"{c['model']} f=({self.K[0, 0]:.0f},{self.K[1, 1]:.0f}) "
+                         f"rms {c['rms']} px, {c['n_views']} views, {c['date']}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:      # malformed file: fall back rather than take the app down
+            print(f"[precland] WARNING: ignoring {path}: {e}")
+        print(f"[precland] camera model: {self.desc}")
+
+    def normalize(self, pts):
+        """(N,2) px → (N,2) normalised (x/z, y/z) on the undistorted camera."""
+        p = np.asarray(pts, np.float64).reshape(-1, 1, 2)
+        pin = (p.reshape(-1, 2) - (CX, CY)) / (FX, FY)
+        if self.K is None:
+            return pin
+        und = cv2.fisheye.undistortPoints if self.fisheye else cv2.undistortPoints
+        n = und(p, self.K, self.D).reshape(-1, 2)
+        # The distortion polynomial is only valid inside the calibrated region; outside
+        # it (or if the iterative inverse fails) it diverges — fall back to the pinhole
+        # for that point rather than send a wild bearing to the FC.
+        bad = ~np.isfinite(n).all(axis=1) | (np.abs(n) > MAX_NORM).any(axis=1)
+        if bad.any():
+            n[bad] = pin[bad]
+        return n
+
+    def rectify_px(self, pts):
+        """(N,2) px → undistorted px on the F_PX pinhole (CX, CY), so pixel-unit quantities
+        (marker px size for the calibration card, yaw vector) keep their old meaning."""
+        return self.normalize(pts) * (FX, FY) + (CX, CY)
+
+
+CAM = CameraModel()
 
 # Kamerakalibrering: ArUco-markörens verkliga sidlängd (svarta fyrkanten), meter.
 # MÄT den utskrivna markören och sätt rätt värde — hela kalibreringen beror på detta.
@@ -126,9 +185,8 @@ class Target:
     def angles(self):
         """(angle_x, angle_y) i rad rel. kameraxeln. +x=höger, +y=nedåt i bilden.
         Kamera-monteringsmappning till kroppsframe (BODY_FRD) görs i app.py."""
-        ax = math.atan2(self.u - CX, FX)
-        ay = math.atan2(self.v - CY, FY)
-        return ax, ay
+        x, y = CAM.normalize([[self.u, self.v]])[0]
+        return math.atan(x), math.atan(y)
 
     def offset_norm(self):
         """Normaliserad offset [-1,1] från bildcentrum (för UI)."""
@@ -139,7 +197,7 @@ class Target:
         För kamerakalibrering: f = px_size * avstånd / markör_verklig_storlek."""
         if self.corners is None:
             return None
-        p = self.corners
+        p = CAM.rectify_px(self.corners)
         return sum(math.hypot(*(p[(i + 1) % 4] - p[i])) for i in range(4)) / 4.0
 
     def yaw_error_rad(self):
@@ -149,7 +207,7 @@ class Target:
         höger i bilden. Bara giltigt för ArUco (kräver corners)."""
         if self.corners is None:
             return None
-        up = _marker_up_vector(self.corners)
+        up = _marker_up_vector(CAM.rectify_px(self.corners))
         return math.atan2(up[0], -up[1])
 
 
