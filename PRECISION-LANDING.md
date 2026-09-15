@@ -537,7 +537,8 @@ FC values read the same day: `PLND_EST_TYPE 1, STRICT 1, ALT_MIN 0.2, XY_DIST_MA
 RET_MAX 4, RET_BEHAVE 0, LAG 0.05, RNGFND1_MAX_CM 500` (not 800 as written above — the FC
 treats the lidar as invalid above 5 m; precland still works there because we send
 `distance` ourselves). Intermittent detection at ~10 m is fine as long as gaps stay below
-`PLND_TIMEOUT` (2 s). Do not raise `RNGFND1_MAX_CM` or feed the marker range as a rangefinder.
+`PLND_TIMEOUT`, which was 2 s → **set to 4.0** the same day for that reason. Do not raise
+`RNGFND1_MAX_CM` or feed the marker range as a rangefinder.
 
 ## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
