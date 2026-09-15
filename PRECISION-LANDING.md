@@ -458,8 +458,42 @@ radtätheter. Video/CSV får grövre tidsupplösning (20 Hz istället för upp t
 värt det, eftersom kontroll-loopens takt (som styr själva landningen) spelar större roll än
 inspelningens tidsupplösning.
 
+## Flight test #7 — IMX296 global shutter camera, native 1456x1088 (2026-09-15)
+
+Six landings analysed (`rec_20260915_183127` … `184145`, 3× LAND, 3× RTL, all from 8 m AGL;
+`183750` manually aborted, excluded). First flight with the IMX296 (see camera-swap note at the top).
+
+| | IMX219 (08-24) | IMX296 (09-15) |
+|---|---|---|
+| Final offset at last ArUco fix (~0.45 m AGL) | — | **0.1–4.4 cm**, all six |
+| ArUco detection 1–7 m AGL | 14–90 % | **86–100 %** (68 % at 4 m, see below) |
+| First acquisition | — | 8.0 m AGL in all six, from up to 3 m lateral offset |
+| Loop rate 1–4 m / 5–7 m | 13 / 19 Hz | 13–20 / 24–32 Hz |
+| Latency (median) | 68 ms | 44 ms |
+
+- Native 1456x1088 costs nothing in practice: loop rate is governed by ground texture (grass at
+  low AGL → more ArUco candidates), not by resolution — equal or faster than the IMX219 at 1024x768
+  at every altitude. Frames are sharp with no motion blur (global shutter + 2000 µs); marker ≈45 px
+  at 6 m, still cleanly detected.
+- **4 m detection dip** (183127, 183300, 184033): marker at ay ≈ ±25° — at the vertical image
+  edge (VFOV/2 = 30.5°) — when the drone pitched 10–12° toward it. The fixed camera tilts with the
+  body, marker leaves the frame for 0.7–1.3 s, back as soon as pitch levels. Harmless (descent
+  continued, no `PLND_STRICT` retry) and a consequence of the wider FOV acquiring markers the old
+  camera never saw.
+- **Landing-gear legs are in the frame** (top corners, ~12 % of width each). No loss caused today;
+  a marker passing behind a leg would be. Watch for it in data before acting.
+- Marker print is glossy (black reads mid-grey with specular sheen). Detection copes; a matte
+  print would add margin at long range.
+- Lens has noticeable fisheye distortion; the pinhole model (`F_PX`) is only right near the
+  centre. Next: proper camera calibration (see "Uppskjutet").
+
+No code or parameter changes needed.
+
 ## Uppskjutet
 
+- **Kamerakalibrering (IMX296 fisheye)** — cv2 fisheye/pinhole calibration with a chessboard,
+  undistort (or `undistortPoints` on the ArUco corners only, cheap) so the angle→target mapping
+  is correct at the image edges, where the wide FOV now actually finds the marker.
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
 - **TF-Luna AGL=None en stor del av flygningen** (se Flygtest #6) — varför, och går det åtgärda?
   Höjdgrindningen (WAIT/RTK-HOLD) är inaktiv (faller till "detektera ändå") när det händer.
