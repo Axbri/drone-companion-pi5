@@ -105,6 +105,21 @@ class CameraModel:
         (marker px size for the calibration card, yaw vector) keep their old meaning."""
         return self.normalize(pts) * (FX, FY) + (CX, CY)
 
+    def preview_maps(self, size, zoom=0.72):
+        """Remap tables that undistort AND downscale the full frame to `size` in one pass —
+        for the web preview only (the CV loop and the recording stay on the raw image).
+        zoom < 1 pulls the edges in so the whole (now wider) view fits, black corners are
+        the fisheye's own footprint. None without a calibration."""
+        if self.K is None:
+            return None
+        sx, sy = size[0] / CV_W, size[1] / CV_H
+        newK = np.array([[self.K[0, 0] * sx * zoom, 0, size[0] / 2.0],
+                         [0, self.K[1, 1] * sy * zoom, size[1] / 2.0],
+                         [0, 0, 1]])
+        if self.fisheye:
+            return cv2.fisheye.initUndistortRectifyMap(self.K, self.D, np.eye(3), newK, size, cv2.CV_16SC2)
+        return cv2.initUndistortRectifyMap(self.K, self.D, None, newK, size, cv2.CV_16SC2)
+
 
 CAM = CameraModel()
 
@@ -237,7 +252,7 @@ class PrecLandDetector:
                 return Target(float(u), float(v), "aruco", aruco_id=int(i), corners=pts)
         return None
 
-    def annotate(self, bgr, target, phase=None, agl=None):
+    def annotate(self, bgr, target, phase=None, agl=None, text=True):
         """Ritar bildanalys-grafiken (visas i webben). `bgr` är en gråskalebild
         konverterad till 3-kanalig (cv2.COLOR_GRAY2BGR) bara för att overlayn ska
         synas i färg — själva bilden bär ingen kulörinformation."""
@@ -259,19 +274,30 @@ class PrecLandDetector:
                                 col, 2, tipLength=0.35)
             cv2.line(bgr, (int(CX), int(CY)), (u, v), col, 2)
             cv2.circle(bgr, (u, v), 4, col, -1)
+        if text:
+            self.hud_text(bgr, target, phase, agl)
+        return bgr
+
+    @staticmethod
+    def hud_text(img, target, phase=None, agl=None):
+        """Text overlay, sized to `img` — drawn separately from the geometry so the
+        undistorted preview can add it AFTER the remap (else the text warps too)."""
+        h, w = img.shape[:2]
+        k = w / CV_W                      # 1.0 on the full frame, 0.5 on the preview
+        if target is not None:
+            col = (0, 255, 0) if phase == PHASE_ARUCO else (0, 0, 255)
             ax, ay = target.angles()
-            cv2.putText(bgr, "%s  ax=%.1f ay=%.1f deg" % (
+            cv2.putText(img, "%s  ax=%.1f ay=%.1f deg" % (
                 phase or "ARUCO", math.degrees(ax), math.degrees(ay)),
-                (8, CV_H - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+                (8, h - 12), cv2.FONT_HERSHEY_SIMPLEX, max(0.4, 0.5 * k * 1.4), col, 1)
         hud = []
         if phase:
             hud.append(phase)
         if agl is not None:
             hud.append("AGL %.2fm" % agl)
         if hud:
-            cv2.putText(bgr, "  ".join(hud), (8, 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        return bgr
+            cv2.putText(img, "  ".join(hud), (8, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, max(0.5, 0.6 * k * 1.4), (255, 255, 255), 2)
 
 
 # ---- kamera→kropp-rotationen görs av ArduPilot, INTE här ---------------
@@ -381,6 +407,7 @@ class PrecLandController:
     def __init__(self, cam, tel, rangefinder=None):
         self.cam, self.tel, self.rf = cam, tel, rangefinder
         self.det = PrecLandDetector()
+        self._preview_maps = CAM.preview_maps(self.PUSH_SIZE)
         self._recording = False
         self._last_armed = False   # för att detektera disarm (True→False), inte bara "är disarmerad"
         self._tx = 0
@@ -684,13 +711,21 @@ class PrecLandController:
                 # faktiskt ska visas (do_push) eller sparas (recording), inte annars
                 # (t.ex. en enqueue som bara nådde tröskeln pga inspelning medan preview-
                 # takten redan har sin egen frame nyss).
-                out = self.det.annotate(bgr, target, phase=phase, agl=agl) if (do_push or recording) else None
+                undist = self._preview_maps is not None
+                out = (self.det.annotate(bgr, target, phase=phase, agl=agl, text=not undist)
+                       if (do_push or recording) else None)
 
                 if do_push:
-                    small = cv2.resize(out, self.PUSH_SIZE, interpolation=cv2.INTER_AREA)
+                    if undist:      # undistorted preview (see CameraModel): remap the geometry
+                        small = cv2.remap(out, *self._preview_maps, cv2.INTER_LINEAR)
+                        self.det.hud_text(small, target, phase, agl)    # ...then the text, unwarped
+                    else:
+                        small = cv2.resize(out, self.PUSH_SIZE, interpolation=cv2.INTER_AREA)
                     ok, jpg = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     if ok:
                         self.cam.push_frame(jpg.tobytes())
+                if undist and recording:
+                    self.det.hud_text(out, target, phase, agl)          # recording keeps the raw view + text
 
                 if recording:
                     if writer is None:
