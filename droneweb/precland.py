@@ -393,6 +393,11 @@ class PrecLandController:
 
     PUSH_HZ = 20                        # live-förhandsvisningens takt (halva RATE_HZ) — sparar bandbredd
     PUSH_SIZE = (CV_W // 2, CV_H // 2)   # halva upplösningen för samma anledning (728x544)
+    PREVIEW_UNDISTORT = False            # remap the web preview through the lens calibration
+                                         # (CameraModel.preview_maps). Off by default to save
+                                         # CPU on the writer thread — the calibration itself is
+                                         # always applied to the ArUco measurement regardless.
+                                         # Verified visually 2026-09-15 (straight door frames).
 
     ENQUEUE_HZ = 20   # takt för BÅDE live-förhandsvisning och inspelning (CSV/AVI) till writer-
                       # tråden. Inspelning körde tidigare varje tick (40Hz) obegränsat — writer-
@@ -407,7 +412,7 @@ class PrecLandController:
     def __init__(self, cam, tel, rangefinder=None):
         self.cam, self.tel, self.rf = cam, tel, rangefinder
         self.det = PrecLandDetector()
-        self._preview_maps = CAM.preview_maps(self.PUSH_SIZE)
+        self._preview_maps = CAM.preview_maps(self.PUSH_SIZE) if self.PREVIEW_UNDISTORT else None
         self._recording = False
         self._last_armed = False   # för att detektera disarm (True→False), inte bara "är disarmerad"
         self._tx = 0

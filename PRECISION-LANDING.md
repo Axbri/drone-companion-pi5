@@ -501,9 +501,11 @@ The pinhole model could not fit at all (RMS 2.3 px, f → 6000), so the lens is 
 `droneweb/camera_calib_imx296.json` is loaded by `precland.CameraModel`; only the ArUco centre
 and corners are undistorted (`fisheye.undistortPoints`, ~60 µs/frame), the image itself is not.
 Fallback to the `F_PX` pinhole when the file is missing or a point diverges (>70° off-axis).
-The web preview (writer thread, 728x544, only while someone is watching) is undistorted with a
-single remap that also does the downscale (`CameraModel.preview_maps`, zoom 0.72 — black corners
-are the fisheye footprint); the CV loop and the AVI recording stay on the raw image.
+The web preview can be undistorted too (`PrecLandController.PREVIEW_UNDISTORT`, a single remap
+that also does the downscale, `CameraModel.preview_maps`, zoom 0.72 — black corners are the
+fisheye footprint). **Off by default** to save CPU: it was used once to verify the calibration
+visually (door frames/shelves straight, 2026-09-15) and is not needed for landing — the CV loop,
+the AVI recording and the preview all stay on the raw image; only the ArUco points are corrected.
 Effect vs the old pinhole: a fixed ~2°/1° bias from the principal-point offset is gone, and at the
 image edges the bearing was 9° too small (36° vs 45° at the right edge) — exactly where the wide
 lens now acquires markers 3 m off at 8 m AGL. Redo the capture+solve if the lens is moved or
