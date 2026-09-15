@@ -526,9 +526,10 @@ silently had no target position. Now:
 - `LANDING_TARGET.distance` = lidar AGL when valid (unchanged, flight-proven), else marker LOS range.
 - `aruco_start_agl` default 7 → 12 m, slider max 40. The 30 cm marker decodes to ~10–11 m
   (≈27 px side), so a higher start needs a bigger marker (0.6 m → ~22 m, 0.8 m → ~29 m).
-- CSV gains `agl_src, mrange, magl`. Validation against the lidar in the 0.4–7.6 m band of
-  today's recordings: linear, ratio marker/lidar ≈ 1.08 — consistent with the printed black
-  square being ~32 cm rather than 30 (`MARKER_M`); measure and correct.
+- CSV gains `agl_src, mrange, magl`. Bench check with a tape measure (marker centred, 1.00 and
+  2.00 m from the lens): camera 1.02 / 2.04 m (pure +2 % scale → `MARKER_RANGE_SCALE`), lidar
+  0.97 / 1.97 m (constant −3 cm, mounting offset). Flight recordings showed marker/lidar ≈ 1.08
+  in the 0.4–7.6 m band — those two effects plus tilt geometry during the approach.
 
 **ArduPilot:** check `PLND_ALT_MAX` (default 8 m in 4.3+, no corrections above it) → 0 or ≥ the
 intended start height. `PLND_XY_DIST_MAX` (2.5 m) stays: with `PLND_STRICT=1` the vehicle holds

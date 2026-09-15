@@ -128,6 +128,11 @@ CAM = CameraModel()
 # 0.30 = landnings-markörens ArUco (flyg). Bänk-test-markören var 0.145.
 MARKER_M = 0.30
 ASSUMED_F = FX               # antagen brännvidd (px) att jämföra uppmätt mot
+# Marker-derived range (Target.range_m) vs a tape measure on the bench, 2026-09-15: 1.02 m
+# at 1.00 and 2.04 m at 2.00 — a pure 2 % scale (no offset), i.e. the calibrated f is ~2 %
+# high. Corrected here rather than in the calibration. (Lidar read 0.97 / 1.97 in the same
+# test: a constant -3 cm from its mounting position, not a scale error.)
+MARKER_RANGE_SCALE = 1.0 / 1.02
 
 PHASE_WAIT, PHASE_ARUCO, PHASE_RTK = "WAIT", "ARUCO", "RTK-HOLD"
 
@@ -216,7 +221,7 @@ class Target:
             img = CAM.normalize(self.corners).reshape(4, 1, 2)
             ok, _, tvec = cv2.solvePnP(_MARKER_OBJ, img, np.eye(3), None,
                                        flags=cv2.SOLVEPNP_IPPE_SQUARE)
-            t = tvec.ravel()
+            t = tvec.ravel() * MARKER_RANGE_SCALE
             self._pose = (float(np.linalg.norm(t)), float(t[2])) if ok and t[2] > 0 else False
         return self._pose or None
 
