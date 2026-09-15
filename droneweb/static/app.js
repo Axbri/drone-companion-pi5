@@ -274,6 +274,8 @@ async function pollPrecland() {
     $("pl-phase").textContent = p.phase || "…";
     $("pl-source").textContent = p.source || "–";
     $("pl-agl").textContent = p.agl != null ? Number(p.agl).toFixed(2) : "–";
+    $("pl-agl-src").textContent = p.agl_src ? `(${p.agl_src})` : "";
+    $("pl-mrange").textContent = p.marker_range != null ? Number(p.marker_range).toFixed(2) : "–";
     $("pl-offset").textContent = p.offset ? `${p.offset[0]}, ${p.offset[1]}` : "–";
     $("pl-tx").textContent = p.sent ? `sending (${p.tx})` : (p.tx ? `paused (${p.tx})` : "–");
     $("pl-rf").textContent = p.rangefinder_ok ? "OK" : "none";

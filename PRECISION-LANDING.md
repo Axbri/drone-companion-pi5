@@ -511,6 +511,30 @@ image edges the bearing was 9° too small (36° vs 45° at the right edge) — e
 lens now acquires markers 3 m off at 8 m AGL. Redo the capture+solve if the lens is moved or
 refocused (`square` = measured square size).
 
+## Marker-derived AGL — tracking above the lidar's range (2026-09-15, not yet flight-tested)
+
+Goal: start correcting toward the pad from higher than the TF-Luna's 8 m. ArduPilot
+(`AC_PrecLand::construct_pos_meas_using_rangefinder`) needs either a valid rangefinder or
+`LANDING_TARGET.distance > 0`; we used to send `distance = lidar AGL or 0`, so above 8 m the FC
+silently had no target position. Now:
+
+- `Target.range_m()`: `cv2.solvePnP(IPPE_SQUARE)` on the four undistorted corners with the known
+  `MARKER_M` square → (line-of-sight range, along-axis distance). ~50 µs.
+- Effective AGL = lidar when valid, else marker-derived (along-axis × cos roll × cos pitch).
+  Drives the phase logic and the camera-offset compensation. `agl_src` (lidar/marker) is shown in
+  the web UI and logged; the calibration card still uses the lidar only.
+- `LANDING_TARGET.distance` = lidar AGL when valid (unchanged, flight-proven), else marker LOS range.
+- `aruco_start_agl` default 7 → 12 m, slider max 40. The 30 cm marker decodes to ~10–11 m
+  (≈27 px side), so a higher start needs a bigger marker (0.6 m → ~22 m, 0.8 m → ~29 m).
+- CSV gains `agl_src, mrange, magl`. Validation against the lidar in the 0.4–7.6 m band of
+  today's recordings: linear, ratio marker/lidar ≈ 1.08 — consistent with the printed black
+  square being ~32 cm rather than 30 (`MARKER_M`); measure and correct.
+
+**ArduPilot:** check `PLND_ALT_MAX` (default 8 m in 4.3+, no corrections above it) → 0 or ≥ the
+intended start height. `PLND_XY_DIST_MAX` (2.5 m) stays: with `PLND_STRICT=1` the vehicle holds
+altitude until within it. Intermittent detection at 10 m is fine as long as gaps stay below
+`PLND_TIMEOUT` (4 s). Do not raise `RNGFND1_MAX_CM` or feed the marker range as a rangefinder.
+
 ## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
 - **TF-Luna AGL=None en stor del av flygningen** (se Flygtest #6) — varför, och går det åtgärda?

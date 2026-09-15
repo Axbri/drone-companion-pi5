@@ -190,12 +190,35 @@ def _apply_cam_offset(ax, ay, agl, offset_fwd_m):
     return math.atan2(right_cam, down_cg), math.atan2(-fwd_cg, down_cg)
 
 
+# Marker corners in the marker's own frame, in the order cv2.SOLVEPNP_IPPE_SQUARE
+# requires (TL, TR, BR, BL with y up) — the same order ArUco returns image corners in.
+_MARKER_OBJ = np.array([[-0.5, 0.5, 0], [0.5, 0.5, 0], [0.5, -0.5, 0], [-0.5, -0.5, 0]],
+                       np.float64) * MARKER_M
+
+
 class Target:
-    __slots__ = ("u", "v", "source", "aruco_id", "corners")
+    __slots__ = ("u", "v", "source", "aruco_id", "corners", "_pose")
 
     def __init__(self, u, v, source, aruco_id=None, corners=None):
         self.u, self.v, self.source = u, v, source
         self.aruco_id, self.corners = aruco_id, corners
+        self._pose = None
+
+    def range_m(self):
+        """(los_range_m, axis_dist_m) from the marker's apparent size and shape: solvePnP
+        on the four undistorted corners (known MARKER_M square). los = straight-line
+        distance camera→marker centre (what LANDING_TARGET.distance means), axis = its
+        component along the optical axis (≈ AGL when the camera points straight down).
+        None without corners or if the solve fails. Replaces the lidar above its range."""
+        if self.corners is None:
+            return None
+        if self._pose is None:
+            img = CAM.normalize(self.corners).reshape(4, 1, 2)
+            ok, _, tvec = cv2.solvePnP(_MARKER_OBJ, img, np.eye(3), None,
+                                       flags=cv2.SOLVEPNP_IPPE_SQUARE)
+            t = tvec.ravel()
+            self._pose = (float(np.linalg.norm(t)), float(t[2])) if ok and t[2] > 0 else False
+        return self._pose or None
 
     def angles(self):
         """(angle_x, angle_y) i rad rel. kameraxeln. +x=höger, +y=nedåt i bilden.
@@ -350,7 +373,9 @@ YAW_MODES = ("LAND", "RTL")
 REC_DIR = "/home/axel/recordings"
 CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
               "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent,scale,"
-              "yaw_err_deg,yaw_cmd_deg,yaw_align,loop_hz,latency_ms\n")
+              "yaw_err_deg,yaw_cmd_deg,yaw_align,loop_hz,latency_ms,"
+              "agl_src,mrange,magl\n")     # agl = effective (lidar or marker); mrange = marker
+                                         # line-of-sight range, magl = marker-derived AGL
 
 
 def _f(v, nd=3):
@@ -379,8 +404,11 @@ class PrecLandController:
 
     # Höjdtrösklar — live-justerbara i webben (för experiment under flygning). Default-
     # värdena är startpunkter, inte hårda gränser; se set_thresholds().
-    ARUCO_START_AGL_DEFAULT = 7.0          # m — ovanför denna: leta inte ens efter ArUco (WAIT-fas)
-    ARUCO_START_MIN, ARUCO_START_MAX = 1.0, 10.0
+    ARUCO_START_AGL_DEFAULT = 12.0         # m — above this: WAIT phase, nothing sent even if seen.
+                                           # Raised 7→12 (2026-09-15) once the marker's own range
+                                           # estimate took over from the lidar above 8 m; the 30 cm
+                                           # marker is decodable to ~10-11 m, so 12 = "as soon as seen".
+    ARUCO_START_MIN, ARUCO_START_MAX = 1.0, 40.0
     RTK_AGL_DEFAULT = 0.3                  # m — under denna: sluta skicka, RTK håller x/y
     RTK_AGL_MIN, RTK_AGL_MAX = 0.1, 2.0
     YAW_START_AGL_DEFAULT = 5.0            # m — girinriktning börjar inte förrän under denna höjd
@@ -435,7 +463,8 @@ class PrecLandController:
         self._loop_hz = None                  # verklig loop-takt, EWMA
         self._last_tick = None
         self._st_lock = threading.Lock()
-        self._status = {"phase": None, "source": None, "agl": None,
+        self._status = {"phase": None, "source": None, "agl": None, "agl_src": None,
+                        "marker_range": None,
                         "offset": None, "tx": 0, "sent": False, "rec_file": None,
                         "calib": None, "latency_ms": None, "loop_hz": None,
                         "yaw_err_deg": None}
@@ -559,14 +588,13 @@ class PrecLandController:
         """Latens-kritisk: detektera målet och skicka LANDING_TARGET direkt."""
         yuv, sensor_ts = self.cam.capture_ts()
         gray = yuv[:CV_H, :CV_W]
-        agl = self.rf.agl() if self.rf else None
-        phase = self._decide_phase(agl)
+        tel_snap = self.tel.snapshot()
 
         # Stoppa inspelning automatiskt vid disarm (kant-triggat: bara True→False, inte
         # "är för tillfället disarmerad" — annars skulle det aldrig gå att spela in på
         # bänken utan att drönaren är armerad). _last_armed initieras False så första
         # riktiga läsningen aldrig ger ett falskt larm innan telemetri kommit in.
-        armed_now = self.tel.snapshot().get("armed")
+        armed_now = tel_snap.get("armed")
         if self._last_armed and armed_now is False and self._recording:
             self.stop_recording()
         if armed_now is not None:
@@ -577,6 +605,26 @@ class PrecLandController:
         # explicit grindad på phase == PHASE_ARUCO nedan, INTE på om ett mål hittades.
         aruco = self.det.detect_aruco(gray)
         target = aruco
+
+        # AGL: lidar (TF-Luna, valid 0.1-8 m) when it has a value, else the marker's own
+        # range estimate (solvePnP on its corners, tilt-corrected with the FC attitude) —
+        # this is what lets tracking start above the lidar's range. The lidar-only value
+        # `agl` is kept for the calibration card (marker-derived would be circular there).
+        agl = self.rf.agl() if self.rf else None
+        mrange = target.range_m() if target is not None else None
+        magl = None
+        if mrange is not None:
+            roll, pitch = tel_snap.get("roll"), tel_snap.get("pitch")
+            tilt = (math.cos(math.radians(roll)) * math.cos(math.radians(pitch))
+                    if roll is not None and pitch is not None else 1.0)
+            magl = mrange[1] * max(tilt, 0.5)
+        if agl is not None:
+            agl_eff, agl_src = agl, "lidar"
+        elif magl is not None:
+            agl_eff, agl_src = magl, "marker"
+        else:
+            agl_eff, agl_src = None, None
+        phase = self._decide_phase(agl_eff)
 
         # Gråskala→BGR bara för overlay-färg i förhandsvisning/inspelning (cvtColor
         # GRAY2BGR är en billig kanal-replikering, inte en riktig färgkonvertering —
@@ -595,11 +643,15 @@ class PrecLandController:
         sent = False
         if target is not None:
             ax, ay = target.angles()                      # rå, kamerans egen mätning (kalibrering)
-            ax_s, ay_s = _apply_cam_offset(ax, ay, agl, self._cam_offset_m)  # korrigerad, CG-referens
+            ax_s, ay_s = _apply_cam_offset(ax, ay, agl_eff, self._cam_offset_m)  # korrigerad, CG-referens
             ox, oy = target.offset_norm()
             if phase == PHASE_ARUCO:
                 k = self._cmd_scale                      # styrskala: mildare korrektion
-                self.tel.send_landing_target(ax_s * k, ay_s * k, agl if agl else 0.0)
+                # distance: ArduPilot uses it instead of its rangefinder when > 0
+                # (AC_PrecLand::construct_pos_meas_using_rangefinder). Lidar AGL when valid
+                # (flight-proven), else the marker's line-of-sight range; 0 if neither.
+                dist = agl if agl else (mrange[0] if mrange else 0.0)
+                self.tel.send_landing_target(ax_s * k, ay_s * k, dist)
                 sent = True
                 self._tx += 1
 
@@ -609,13 +661,12 @@ class PrecLandController:
             ye = target.yaw_error_rad()
             if ye is not None:
                 yaw_err_deg = math.degrees(ye)
-                tel_snap = self.tel.snapshot()
                 cur_yaw = tel_snap.get("yaw")
                 if cur_yaw is not None:
                     yaw_cmd_deg = (cur_yaw + YAW_ERR_SIGN * yaw_err_deg) % 360.0
                     if (phase == PHASE_ARUCO and self._yaw_align
                             and tel_snap.get("mode") in YAW_MODES
-                            and agl is not None and agl <= self._yaw_start_agl):
+                            and agl_eff is not None and agl_eff <= self._yaw_start_agl):
                         now_yaw = time.time()
                         if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
                             self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
@@ -649,7 +700,8 @@ class PrecLandController:
         with self._st_lock:
             self._status.update(
                 phase=phase, source=(target.source if target else None),
-                agl=(round(agl, 2) if agl is not None else None),
+                agl=(round(agl_eff, 2) if agl_eff is not None else None), agl_src=agl_src,
+                marker_range=(round(mrange[0], 2) if mrange else None),
                 offset=([round(ox, 3), round(oy, 3)] if target else None),
                 tx=self._tx, sent=sent, calib=calib,
                 yaw_err_deg=(round(yaw_err_deg, 1) if yaw_err_deg is not None else None),
@@ -662,10 +714,10 @@ class PrecLandController:
         # ax_s/ay_s (kamera-offset-korrigerade, det som faktiskt skickades) loggas i
         # CSV:n, inte de råa ax/ay (de används bara internt för kalibreringsdiagnostik).
         if need_video and bgr is not None:
-            self._enqueue((bgr, target, phase, agl,
+            self._enqueue((bgr, target, phase, agl_eff,
                            self._recording, ox, oy, ax_s, ay_s, time.time(),
-                           self.tel.snapshot(), yaw_err_deg, yaw_cmd_deg,
-                           self._loop_hz, self._lat_ms))
+                           tel_snap, yaw_err_deg, yaw_cmd_deg,
+                           self._loop_hz, self._lat_ms, agl_src, mrange, magl))
 
     def _decide_phase(self, agl):
         if agl is None:                        # ingen AGL (t.ex. bänk utan TF-Luna) -> detektera ändå
@@ -703,7 +755,7 @@ class PrecLandController:
                     continue
                 (bgr, target, phase, agl, recording,
                  ox, oy, ax, ay, t, tel, yaw_err_deg, yaw_cmd_deg,
-                 loop_hz, lat_ms) = item
+                 loop_hz, lat_ms, agl_src, mrange, magl) = item
 
                 do_push = False
                 if self.cam.viewers > 0:
@@ -738,7 +790,7 @@ class PrecLandController:
                     writer.write(out)
                     csvf.write(self._row(t, tel, agl, phase, target,
                                          ox, oy, ax, ay, yaw_err_deg, yaw_cmd_deg,
-                                         loop_hz, lat_ms))
+                                         loop_hz, lat_ms, agl_src, mrange, magl))
                 elif writer is not None:
                     writer.release(); csvf.close(); writer = csvf = None
         finally:
@@ -748,7 +800,7 @@ class PrecLandController:
                 csvf.close()
 
     def _row(self, t, tel, agl, phase, target, ox, oy, ax, ay,
-             yaw_err_deg, yaw_cmd_deg, loop_hz, lat_ms):
+             yaw_err_deg, yaw_cmd_deg, loop_hz, lat_ms, agl_src=None, mrange=None, magl=None):
         sent = phase == PHASE_ARUCO and target is not None
         return ",".join([
             "%.3f" % t, str(tel.get("mode", "")), "1",
@@ -760,6 +812,7 @@ class PrecLandController:
             _f(math.degrees(ay) if ay is not None else None), "1" if sent else "0",
             "%.2f" % self._cmd_scale, _f(yaw_err_deg), _f(yaw_cmd_deg),
             "1" if self._yaw_align else "0", _f(loop_hz, 1), _f(lat_ms, 1),
+            agl_src or "", _f(mrange[0] if mrange else None), _f(magl),
         ]) + "\n"
 
 
