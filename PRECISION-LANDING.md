@@ -531,10 +531,13 @@ silently had no target position. Now:
   0.97 / 1.97 m (constant −3 cm, mounting offset). Flight recordings showed marker/lidar ≈ 1.08
   in the 0.4–7.6 m band — those two effects plus tilt geometry during the approach.
 
-**ArduPilot:** check `PLND_ALT_MAX` (default 8 m in 4.3+, no corrections above it) → 0 or ≥ the
-intended start height. `PLND_XY_DIST_MAX` (2.5 m) stays: with `PLND_STRICT=1` the vehicle holds
-altitude until within it. Intermittent detection at 10 m is fine as long as gaps stay below
-`PLND_TIMEOUT` (4 s). Do not raise `RNGFND1_MAX_CM` or feed the marker range as a rangefinder.
+**ArduPilot:** `PLND_ALT_MAX` (no corrections above it) was 7.0 → **set to 10.0** via MAVLink
+2026-09-15 (matches the 30 cm marker's decode range; raise again with a bigger marker).
+FC values read the same day: `PLND_EST_TYPE 1, STRICT 1, ALT_MIN 0.2, XY_DIST_MAX 5, TIMEOUT 2,
+RET_MAX 4, RET_BEHAVE 0, LAG 0.05, RNGFND1_MAX_CM 500` (not 800 as written above — the FC
+treats the lidar as invalid above 5 m; precland still works there because we send
+`distance` ourselves). Intermittent detection at ~10 m is fine as long as gaps stay below
+`PLND_TIMEOUT` (2 s). Do not raise `RNGFND1_MAX_CM` or feed the marker range as a rangefinder.
 
 ## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
