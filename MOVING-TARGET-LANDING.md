@@ -170,11 +170,17 @@ takes **2 s** before `TAcq=1` again, so a gap > 2 s in flight costs ~4 s without
 Abort at every step: mode switch to LOITER. Keep the rover's path clear of people; the drone
 descends along it.
 
+## Status
+
+Bench steps 1–2 done 2026-09-16 (see above). Flight steps 3–5 from 2026-09-17, recorded with
+the web Record button, analysed afterwards. FC is in flight configuration (`LOG_DISARMED=0`),
+Pi defaults to static mode / 30 cm marker at every restart.
+
 ## Open points
 
-- Exact FC firmware version — function names in this note are from master; semantics are the
-  same since Copter 4.2 but confirm `PLND_OPTIONS` exists in the installed version.
-- Current `WPNAV_SPEED`/`WPNAV_ACCEL`/`LAND_SPEED` on the FC (backup is from July, before PLND).
+- ~~FC firmware version~~ — Copter 4.6.3, `PLND_OPTIONS` present and confirmed working (bench step 2).
+- ~~Current `WPNAV_SPEED`/`WPNAV_ACCEL`/`LAND_SPEED`~~ — read and set 2026-09-16, see above.
+  Refresh the param backup in the repo once flown.
 - Does the 0.35–2 m slow-down rule actually engage today? The static-pad CSVs show ~33 cm/s
   average in the last 3 m, so maybe not on this firmware — check `agl` vs `t` in the last 2 m.
 - Lidar mounting position vs pad: at touchdown the TF-Luna must see the pad, not the ground

@@ -519,7 +519,10 @@ Goal: start correcting toward the pad from higher than the TF-Luna's 8 m. ArduPi
 silently had no target position. Now:
 
 - `Target.range_m()`: `cv2.solvePnP(IPPE_SQUARE)` on the four undistorted corners with the known
-  `MARKER_M` square → (line-of-sight range, along-axis distance). ~50 µs.
+  marker square → (line-of-sight range, along-axis distance). ~50 µs. The side length is the
+  "Marker size" slider on the calibration card (2026-09-16; default 30 cm = the pad, set 14.5 for
+  the bench marker, logged as `marker_cm`) — it scales this range, the marker AGL and the
+  calibration card's f_meas.
 - Effective AGL = lidar when valid, else marker-derived (along-axis × cos roll × cos pitch).
   Drives the phase logic and the camera-offset compensation. `agl_src` (lidar/marker) is shown in
   the web UI and logged; the calibration card still uses the lidar only.
@@ -563,13 +566,15 @@ within 1–10 cm** despite wind (median tilt below 2 m 1.5–1.8° vs 0.5–0.8�
   Confirm from the dataflash `PL` messages if it matters.
 - Loop 23.5 Hz median (p10 9.7, grass at low AGL), latency 49 ms median.
 
-## Moving-target mode (2026-09-16, not yet flight-tested)
+## Moving-target mode (2026-09-16, bench-tested, not yet flown)
 
 Web switch "Target mode → Moving pad" in the precland tab. Off = everything above, unchanged.
 On = no RTK-hold cut-off, marker range as `LANDING_TARGET.distance`, and Pi-side coasting
 (pad velocity tracked in the FC's local NED frame, extrapolated target sent after the marker is
-lost). Design, FC parameters (`PLND_OPTIONS=7` etc.), CSV columns and the test ladder:
-[`MOVING-TARGET-LANDING.md`](MOVING-TARGET-LANDING.md).
+lost). Design, FC parameters (`PLND_OPTIONS=7`, `PLND_STRICT=2`, `PLND_RET_MAX=0`,
+`LAND_SPEED=40` — set on the FC 2026-09-16, they also apply to static landings), CSV columns,
+bench results and the test ladder: [`MOVING-TARGET-LANDING.md`](MOVING-TARGET-LANDING.md).
+The pad-velocity readout runs in both modes and should read ~0 over a static pad.
 
 ## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.

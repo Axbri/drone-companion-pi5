@@ -47,6 +47,7 @@ drone-ntrip-pi/
 ├── UM982-GPS-CONFIG.md           — GNSS-kompass (UM982) + ArduPilot-params, heading, lärdomar
 ├── WEB-INTERFACE.md              — companion-webbgränssnitt (video + telemetri + Pi-stats + avstängning)
 ├── PRECISION-LANDING.md          — Steg 2: tvåfas-precisionslandning (färg → ArUco → RTK) + TF-Luna
+├── MOVING-TARGET-LANDING.md      — landning på rörlig platta: ArduPilot-analys, FC-params, Pi-coasting, testplan
 ├── droneweb/                     — companion-webappen: app.py, camera.py, mavlink.py, precland.py, rangefinder.py, templates/, static/
 ├── landing-marker/               — utskrivbar landningsmarkör + platta (ArUco DICT_4X4_50 ID0) + generator
 ├── cube-full-params-*.param      — full ArduPilot-param-backup (MP-format)
