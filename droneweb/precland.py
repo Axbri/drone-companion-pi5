@@ -409,11 +409,12 @@ class PrecLandController:
 
     # Höjdtrösklar — live-justerbara i webben (för experiment under flygning). Default-
     # värdena är startpunkter, inte hårda gränser; se set_thresholds().
-    ARUCO_START_AGL_DEFAULT = 12.0         # m — above this: WAIT phase, nothing sent even if seen.
-                                           # Raised 7→12 (2026-09-15) once the marker's own range
-                                           # estimate took over from the lidar above 8 m; the 30 cm
-                                           # marker is decodable to ~10-11 m, so 12 = "as soon as seen".
-    ARUCO_START_MIN, ARUCO_START_MAX = 1.0, 40.0
+    ARUCO_START_AGL_DEFAULT = 20.0         # m — above this: WAIT phase, nothing sent even if seen.
+                                           # 7→12 (2026-09-15) when the marker's own range estimate
+                                           # took over above the lidar; →20 (2026-09-16) after flight
+                                           # test #8 acquired the 30 cm marker at 11-20 m. Matches
+                                           # PLND_ALT_MAX=20 on the FC; the web slider lowers it.
+    ARUCO_START_MIN, ARUCO_START_MAX = 1.0, 20.0
     RTK_AGL_DEFAULT = 0.3                  # m — under denna: sluta skicka, RTK håller x/y
     RTK_AGL_MIN, RTK_AGL_MAX = 0.1, 2.0
     YAW_START_AGL_DEFAULT = 5.0            # m — girinriktning börjar inte förrän under denna höjd

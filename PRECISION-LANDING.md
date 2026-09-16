@@ -524,15 +524,17 @@ silently had no target position. Now:
   Drives the phase logic and the camera-offset compensation. `agl_src` (lidar/marker) is shown in
   the web UI and logged; the calibration card still uses the lidar only.
 - `LANDING_TARGET.distance` = lidar AGL when valid (unchanged, flight-proven), else marker LOS range.
-- `aruco_start_agl` default 7 → 12 m, slider max 40. The 30 cm marker decodes to ~10–11 m
-  (≈27 px side), so a higher start needs a bigger marker (0.6 m → ~22 m, 0.8 m → ~29 m).
+- `aruco_start_agl` default 7 → 12 → 20 m (slider max 20). The 30 cm marker was estimated to decode
+  to ~10–11 m (≈27 px side) but flight test #8 acquired it at up to 20 m (≈15 px); a bigger marker
+  (0.6 m → ~40 m) is still the way to go higher.
 - CSV gains `agl_src, mrange, magl`. Bench check with a tape measure (marker centred, 1.00 and
   2.00 m from the lens): camera 1.02 / 2.04 m (pure +2 % scale → `MARKER_RANGE_SCALE`), lidar
   0.97 / 1.97 m (constant −3 cm, mounting offset). Flight recordings showed marker/lidar ≈ 1.08
   in the 0.4–7.6 m band — those two effects plus tilt geometry during the approach.
 
-**ArduPilot:** `PLND_ALT_MAX` (no corrections above it) was 7.0 → **set to 10.0** via MAVLink
-2026-09-15 (matches the 30 cm marker's decode range; raise again with a bigger marker).
+**ArduPilot:** `PLND_ALT_MAX` (no corrections above it) was 7.0 → 10.0 via MAVLink 2026-09-15 →
+**20.0** on 2026-09-16 after flight test #8 acquired the marker at 11–20 m. `aruco_start_agl`
+default/slider max are 20 to match; lower the slider to delay the manoeuvring.
 FC values read the same day: `PLND_EST_TYPE 1, STRICT 1, ALT_MIN 0.2, XY_DIST_MAX 5, TIMEOUT 2,
 RET_MAX 4, RET_BEHAVE 0, LAG 0.05, RNGFND1_MAX_CM 500` (not 800 as written above — the FC
 treats the lidar as invalid above 5 m; precland still works there because we send
