@@ -540,6 +540,27 @@ treats the lidar as invalid above 5 m; precland still works there because we sen
 `PLND_TIMEOUT`, which was 2 s → **set to 4.0** the same day for that reason. Do not raise
 `RNGFND1_MAX_CM` or feed the marker range as a rangefinder.
 
+## Flight test #8 — calibrated lens + marker-derived AGL, windy (2026-09-16)
+
+12 recordings (`rec_20260916_171254` … `173025`), all LOITER→LAND. **9/12 landed on the marker
+within 1–10 cm** despite wind (median tilt below 2 m 1.5–1.8° vs 0.5–0.8° the day before).
+
+- **Acquisition from height:** first fix at 15.7, 19.9, 15.6, 12.6, 11.0, 11.2, 17.9 m in the seven
+  landings that started high — all on marker-derived AGL (`agl_src=marker`), far beyond the
+  estimated 10–11 m (≈15 px marker at 20 m). Detection alternates frame-by-frame up there;
+  `PLND_TIMEOUT=4` absorbs it.
+- **Marker AGL vs lidar:** 1620 overlap samples, ratio 1.01–1.05 over 0.4–8.5 m (low end mostly the
+  lidar's −3 cm mount offset). Validated.
+- **Edge acquisition (calibration payoff):** 172234 acquired at 11 m with the marker 6.1 m to the
+  side (ax 28→43°, edge is 47°), correction flown 7.4→4.7 m AGL, landed 10 cm off. 172810 acquired
+  in the image corner (ax 39°, ay 35°) at 4.7 m, landed 7 cm off.
+- **Three misses (172123, 172929, 173025):** marker never in view during the recording (pilot
+  deliberately far away). All three hold 6–12 s at ~4.1 m in LAND with nothing sent from the Pi
+  (172929 even climbs 4.4→5.7 m at LAND entry) — not our code; looks like the FC's `PLND_STRICT=1`
+  retry (`PLND_RET_MAX=4`) after losing a target it tracked in LOITER before recording started.
+  Confirm from the dataflash `PL` messages if it matters.
+- Loop 23.5 Hz median (p10 9.7, grass at low AGL), latency 49 ms median.
+
 ## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
 - **TF-Luna AGL=None en stor del av flygningen** (se Flygtest #6) — varför, och går det åtgärda?
