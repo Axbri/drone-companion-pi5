@@ -13,3 +13,7 @@ Thumbs.db
 *.tlog
 *.bin
 flight-recordings/
+
+# Local secrets — never commit
+Raspberry Pi password.txt
+*password*.txt

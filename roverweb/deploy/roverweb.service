@@ -1,0 +1,14 @@
+[Unit]
+Description=roverweb - companion web interface (FastAPI)
+After=network-online.target mavproxy.service
+Wants=network-online.target
+
+[Service]
+User=axel
+WorkingDirectory=/home/axel/roverweb
+ExecStart=/home/axel/mav-venv/bin/python /home/axel/roverweb/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

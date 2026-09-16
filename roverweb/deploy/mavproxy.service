@@ -1,0 +1,18 @@
+[Unit]
+Description=MAVProxy companion link (Pixhawk TELEM1 -> UDP fan-out + NTRIP RTK)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=axel
+WorkingDirectory=/home/axel/mavproxy-logs
+# Endpoints: 14550 (extern GCS), 14551 roverweb, 14552/14553 roverav, 14554
+# roverstereo, 14555 roverlidar (attityd för markfiltret), 14556 roverfusion
+# (skickar den hopslagna OBSTACLE_DISTANCE). Varje klient MÅSTE ha en egen
+# udpin-endpoint — udpin svarar bara till adressen som senast hörde av sig.
+ExecStart=/home/axel/mav-venv/bin/mavproxy.py --master=/dev/serial0,921600 --out=udpin:0.0.0.0:14550 --out=udpin:127.0.0.1:14551 --out=udpin:127.0.0.1:14552 --out=udpin:127.0.0.1:14553 --out=udpin:127.0.0.1:14554 --out=udpin:127.0.0.1:14555 --out=udpin:127.0.0.1:14556 --load-module=ntrip --cmd="ntrip set caster homebase; ntrip set port 2101; ntrip set mountpoint LOCAL; ntrip start" --non-interactive
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

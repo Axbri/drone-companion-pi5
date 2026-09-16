@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rover Control</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="brand">🛰️ ROVER CONTROL</span>
+  <span id="conn" class="pill pill-bad">frånkopplad</span>
+</header>
+
+<main>
+  <!-- LEFT COLUMN -->
+  <section class="col-left">
+    <div class="panel">
+      <h2>Fordonstelemetri</h2>
+      <div class="tele-grid">
+        <div class="kv"><span>Mode</span><b id="t-mode">--</b></div>
+        <div class="kv"><span>Armering</span><b id="t-armed">--</b></div>
+        <div class="kv"><span>Batteri</span><b id="t-volt">-- V</b></div>
+        <div class="kv"><span>Ström</span><b id="t-curr">-- A</b></div>
+        <div class="kv"><span>Kvar</span><b id="t-rem">-- %</b></div>
+        <div class="kv"><span>Fart</span><b id="t-speed">-- m/s</b></div>
+        <div class="kv"><span>Heading</span><b id="t-hdg">--°</b></div>
+        <div class="kv"><span>GPS-fix</span><b id="t-fix">--</b></div>
+        <div class="kv"><span>Sats</span><b id="t-sats">--</b></div>
+        <div class="kv"><span>HDOP</span><b id="t-hdop">--</b></div>
+        <div class="kv wide"><span>Koordinater</span><b id="t-pos">--, --</b></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Styrning</h2>
+      <div class="row">
+        <button id="btn-arm" class="btn btn-arm">ARMERA</button>
+        <button id="btn-disarm" class="btn btn-disarm">DISARMERA</button>
+      </div>
+      <div class="row">
+        <label>Mode
+          <select id="mode-sel">
+            <option>MANUAL</option><option>STEERING</option><option>HOLD</option>
+            <option>AUTO</option><option>GUIDED</option><option>ACRO</option>
+            <option>LOITER</option><option>RTL</option><option>SMART_RTL</option>
+          </select>
+        </label>
+        <button id="btn-mode" class="btn">Sätt</button>
+      </div>
+
+      <div class="auto-box">
+        <div class="kv wide"><span>Kör mot waypoint</span><b id="t-curwp">--</b></div>
+        <div class="row">
+          <input type="number" id="wp-input" min="0" step="1" placeholder="WP-nr">
+          <button id="btn-setwp" class="btn small">Sätt WP</button>
+          <button id="btn-restart" class="btn small" title="Sätt aktuell waypoint till 1">↻ Börja om</button>
+        </div>
+      </div>
+      <div id="drive-note" class="note">Aktiv endast i <b>MANUAL/STEERING</b> + armerad. Håll knapp/tangent, släpp = stopp. Tangenter: <b>piltangenter</b> eller <b>WASD</b> — håll ▲ och dutta ◀/▶ för att svänga under körning.</div>
+      <div class="gain-row">
+        <label for="gain">Effekt</label>
+        <input type="range" id="gain" min="10" max="100" step="5" value="100">
+        <b id="gain-val">100%</b>
+      </div>
+      <div class="dpad" id="dpad">
+        <button class="drive" data-dir="fwd" style="grid-area:up">▲</button>
+        <button class="drive" data-dir="left" style="grid-area:left">◀</button>
+        <button class="drive stop" data-dir="stop" style="grid-area:mid">■</button>
+        <button class="drive" data-dir="right" style="grid-area:right">▶</button>
+        <button class="drive" data-dir="back" style="grid-area:down">▼</button>
+      </div>
+      <div id="msgs" class="msgs"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Raspberry Pi</h2>
+      <div class="tele-grid">
+        <div class="kv"><span>CPU-temp</span><b id="p-temp">-- °C</b></div>
+        <div class="kv"><span>CPU-last</span><b id="p-cpu">-- %</b></div>
+        <div class="kv"><span>Load (1m)</span><b id="p-load">--</b></div>
+        <div class="kv"><span>RAM</span><b id="p-ram">--</b></div>
+        <div class="kv"><span>Nät ↑</span><b id="p-up">--</b></div>
+        <div class="kv"><span>Nät ↓</span><b id="p-down">--</b></div>
+        <div class="kv wide"><span>Data/h (est.)</span><b id="p-gbph">--</b></div>
+      </div>
+      <div class="row">
+        <button id="btn-shutdown" class="btn btn-shutdown small"
+                title="Stänger av Pi:n snyggt. Vänta tills lysdioden slocknat innan strömmen bryts.">
+          ⏻ Stäng av Pi:n</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Nätverk (WiFi)</h2>
+      <div class="tele-grid">
+        <div class="kv wide"><span>Anslutet nät</span><b id="wifi-ssid">--</b></div>
+        <div class="kv"><span>Signal</span><b id="wifi-sig">--</b></div>
+        <div class="kv"><span>IP</span><b id="wifi-ip">--</b></div>
+      </div>
+      <div class="row">
+        <button id="wifi-refresh" class="btn small">↻ Uppdatera / scanna</button>
+      </div>
+      <div id="wifi-saved" class="wifi-list"></div>
+      <details class="wifi-add">
+        <summary>+ Lägg till nät</summary>
+        <div class="row">
+          <select id="wifi-scan-sel"><option value="">— välj ur scan eller skriv nedan —</option></select>
+        </div>
+        <input type="text" id="wifi-ssid-in" class="wifi-in" placeholder="SSID (nätverksnamn)" autocomplete="off">
+        <input type="password" id="wifi-pass-in" class="wifi-in" placeholder="Lösenord (tomt = öppet nät)" autocomplete="off">
+        <div class="row">
+          <button id="wifi-add-btn" class="btn small">Spara nät</button>
+        </div>
+        <div class="note">Tips: lägg till din <b>4G-router här hemma</b> innan du åker — då autoansluter Pi:n på plats.</div>
+      </details>
+      <div id="wifi-msg" class="note dim"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Home base</h2>
+      <div class="kv"><span>RTK-bas (homebase:2101)</span><b id="hb" class="pill pill-bad">--</b></div>
+    </div>
+  </section>
+
+  <div class="splitter" id="split1" title="Dra för att ändra bredd"></div>
+
+  <!-- RIGHT AREA: video | map side by side -->
+  <section class="col-right">
+    <div class="panel video-panel">
+      <h2>Kamera <span id="vid-state" class="pill pill-bad">ansluter…</span></h2>
+      <div class="vid-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <!-- Överlägget ritas ovanpå videon i stället för att brännas in i
+             strömmen — mediamtx slipper koda om, och overlägget kan slås av
+             utan att röra videokedjan. -->
+        <canvas id="cv-overlay"></canvas>
+        <!-- Stereotjänstens egen hinderbild (/stereo.jpg). Sedan V4.6 kör
+             stereo OCH video parallellt (mediamtx i publisher-läge), så det
+             här är inte längre ett nödläge utan ett VAL: väljaren nedan
+             bestämmer om panelen visar videon eller hinderbilden. -->
+        <img id="stereo-img" alt="stereokamerans hinderbild">
+      </div>
+      <div class="vid-ctrl">
+        <!-- Väljare video / hinderbild. Båda kommer från stereokameran när
+             stereo kör; hinderbilden finns bara då. -->
+        <span class="segmented" role="group">
+          <button id="view-video" class="seg on" type="button">Video</button>
+          <button id="view-hinder" class="seg" type="button">Hinderbild</button>
+        </span>
+        <label class="chk">Upplösning
+          <select id="vid-res">
+            <option value="640x480">640×480</option>
+            <option value="1280x960" selected>1280×960</option>
+            <option value="1640x1232">1640×1232</option>
+          </select>
+        </label>
+        <label class="chk">FPS
+          <select id="vid-fps">
+            <option value="5">5</option>
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="30" selected>30</option>
+            <option value="60">60</option>
+          </select>
+        </label>
+        <!-- Styr BÅDA detektorernas live-vy (V3-överlägget och V4-stereons
+             bild + siffror). Av som standard: alltid-på hade kostat ~70 MB/h
+             extra över 4G. Är den urkryssad syns ingenting — det är avsikten,
+             inte ett fel. -->
+        <label class="chk" title="Visar vad hinderdetektorn ser — V3:s överlägg eller stereons bild. Skickas bara när den är ikryssad (~2 kB per bildruta i 5 Hz).">
+          <input type="checkbox" id="cv-on"> Hinderdata
+        </label>
+        <span class="spacer"></span>
+        <span id="vid-br" class="dim">–</span>
+      </div>
+      <!-- Hinderdetekteringen sitter under kamerabilden: radarvyn visar exakt
+           de sektorer som skickas till ArduPilot som OBSTACLE_DISTANCE — inte
+           vad detektorn tyckte, utan vad autopiloten faktiskt får. Skiljer de
+           sig är det just skillnaden man vill se. -->
+      <!-- Dra i det här handtaget (lodrätt) för att göra radarn större/mindre,
+           precis som splittrarna mellan kolumnerna. Radarn växer nedåt/utåt och
+           videon får motsvarande mindre höjd. -->
+      <div class="hsplitter" id="split-radar" title="Dra för att ändra radarns storlek"></div>
+      <div class="cv-bar">
+        <div class="radar-col">
+          <canvas id="cv-radar" width="600" height="600"></canvas>
+          <!-- Förklaring + av/på per lager. Röd = det som FAKTISKT skickas till
+               ArduPilot (fusionen), ritas ovanpå de andra. -->
+          <div class="radar-legend">
+            <label class="chk"><input type="checkbox" id="show-lidar" checked><span class="ldot" style="color:#37b6ff">●</span> Lidar</label>
+            <label class="chk"><input type="checkbox" id="show-cam" checked><span class="ldot" style="color:#2ecc71">●</span> Kamera</label>
+            <label class="chk"><input type="checkbox" id="show-fusion" checked><span class="ldot" style="color:#ff5252">●</span> Till ArduPilot</label>
+          </div>
+        </div>
+        <div class="cv-info">
+          <h3>Hinderdetektering
+            <span id="cv-state" class="pill pill-bad">--</span>
+            <!-- VILKEN detektor som talar. V3 (färg) och V4 (stereo) kan inte
+                 köra samtidigt — båda vill ha cam0 — och siffrorna nedan
+                 betyder olika saker för de två. Att blanda ihop dem vore
+                 värre än att inte visa dem. -->
+            <span id="cv-src" class="pill pill-dim">--</span>
+          </h3>
+          <div class="tele-grid">
+            <div class="kv"><span>Närmast</span><b id="cv-near">--</b></div>
+            <div class="kv"><span>Sektorer</span><b id="cv-sec">--</b></div>
+            <div class="kv" id="kv-surf"><span>Underlag</span><b id="cv-surf">--</b></div>
+            <!-- Stereospecifikt: markplanet är hela den geometriska kedjans
+                 hälsa i två tal. Stämmer de inte med riggen (20°, 27 cm) är
+                 höjdskalan fel — och då är hinderhöjder och markkontakt fel
+                 med den. -->
+            <div class="kv" id="kv-plane" title="Kamerans nedåtvinkel och höjd, uppmätta ur markplanet i varje bildruta. Riggen är byggd för 20° och 27 cm."><span>Markplan</span><b id="cv-plane">--</b></div>
+            <div class="kv" id="kv-sight" title="Så långt bort marken syns vid analysfönstrets överkant. Hinder längre bort har foten utanför bilden och känns inte igen."><span>Sikt</span><b id="cv-sight">--</b></div>
+            <div class="kv"><span>Takt</span><b id="cv-fps">--</b></div>
+          </div>
+          <div id="cv-diag" class="cv-diag dim">--</div>
+
+          <!-- Lidar 360°: egen sensor, egen sektion UNDER kamerans info. Live
+               motorvarvtal, träffar före/efter filtren, lutning, och start/
+               stopp av motorn (start skickar MotorOn + SetRPM 300). -->
+          <h3 class="lidar-h">Lidar 360°
+            <span id="lidar-state" class="pill pill-dim">--</span>
+          </h3>
+          <div class="tele-grid">
+            <div class="kv" title="Uppmätt motorvarvtal (ur datan, ~300 rpm normalt)."><span>Motorvarvtal</span><b id="lidar-rpm">--</b></div>
+            <div class="kv" title="Antal riktningar med träff före → efter mark- och klunga-filtren."><span>Träffar (rå→filtr.)</span><b id="lidar-hits">--</b></div>
+            <div class="kv" title="Bortfiltrerat: markreflektioner (lutning) och enstaka spökprickar (klunga < 3)."><span>Bortfiltrerat</span><b id="lidar-filtered">--</b></div>
+            <div class="kv" title="Roverns lutning ur MAVLink — driver markfiltret."><span>Lutning</span><b id="lidar-att">--</b></div>
+          </div>
+          <div class="row lidar-ctrl">
+            <button id="lidar-start" class="btn small btn-arm" type="button">Starta motor</button>
+            <button id="lidar-stop" class="btn small btn-disarm" type="button">Stoppa motor</button>
+          </div>
+
+          <!-- Bumper 360° sista-skydd: fysiska mikroswitchar V/H + companion-
+               styrd flyktmanöver (backa -> sväng bort -> återuppta AUTO). Egen
+               sektion, tunn linje ovanför precis som lidarn. -->
+          <h3 class="lidar-h">Bumper (sista-skydd)
+            <span id="bumper-state" class="pill pill-dim">--</span>
+          </h3>
+          <div class="tele-grid">
+            <div class="kv" title="Vänster/höger mikroswitch. Lyser rött vid träff (eller kabelbrott — fail-safe).">
+              <span>Träff V / H</span>
+              <b><span id="bump-l" class="bump-dot">V</span> <span id="bump-r" class="bump-dot">H</span></b>
+            </div>
+            <div class="kv" title="Flyktmanöverns fas: backar, svänger, återupptar."><span>Flykt</span><b id="esc-phase">--</b></div>
+            <div class="kv" title="Antal flykter inom senaste 60 s (för många => HOLD)."><span>Flykter (60s)</span><b id="esc-count">--</b></div>
+          </div>
+          <div class="row lidar-ctrl">
+            <label class="chk" title="Slå på för att låta companion-datorn ta över och backa/svänga vid en bumperträff. AV som standard tills bygeln är kopplad.">
+              <input type="checkbox" id="bumper-enable"> Auto-flykt på
+            </label>
+            <button id="escape-test" class="btn small" type="button"
+                    title="Kör hela flyktsekvensen på bänken (hjul upp) utan att röra bumpern.">Testa flykt</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="splitter" id="split2" title="Dra för att ändra storlek"></div>
+    <div class="panel map-panel">
+      <h2>Karta</h2>
+      <div id="map"></div>
+      <div class="map-ctrl">
+        <label class="chk"><input type="checkbox" id="follow" checked> Följ rover</label>
+        <select id="basemap" title="Kartlager">
+          <option value="map">Karta</option>
+          <option value="sat">Satellit</option>
+          <option value="topo">Topo</option>
+          <option value="cycl">Stigar</option>
+        </select>
+        <label class="chk" title="OpenSeaMap sjömärken ovanpå valt underlag">
+          <input type="checkbox" id="seamarks"> Sjömärken
+        </label>
+        <label class="chk" title="Lutningsskuggning (Esri Hillshade)">
+          <input type="checkbox" id="relief"> Relief
+        </label>
+        <label class="chk" title="Geofence från autopiloten">
+          <input type="checkbox" id="lyr-fence" checked> Fence
+        </label>
+        <label class="chk" title="Rally points">
+          <input type="checkbox" id="lyr-rally" checked> Rally
+        </label>
+        <label class="chk" title="Avståndsringar 50/100/200 m från Home">
+          <input type="checkbox" id="lyr-rings"> Ringar
+        </label>
+        <span class="spacer"></span>
+        <button id="btn-readmission" class="btn small">Läs mission</button>
+        <button id="btn-clearwp" class="btn small" title="Rensar waypoints, fence, rally och ringar från kartan">Rensa karta</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

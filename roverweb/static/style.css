@@ -1,0 +1,228 @@
+* { box-sizing: border-box; }
+:root {
+  --bg: #0f141a; --panel: #1a222c; --panel2: #212b36; --line: #2c3a48;
+  --txt: #e6edf3; --dim: #8aa0b3; --accent: #37b6ff;
+  --good: #2ecc71; --warn: #f1c40f; --bad: #e74c3c;
+}
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--txt);
+  font: 14px/1.4 system-ui, "Segoe UI", Roboto, sans-serif;
+  display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+}
+header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 16px; background: #0b1015; border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 700; letter-spacing: 1px; }
+main {
+  flex: 1; display: flex; gap: 0; padding: 12px; min-height: 0;
+}
+.col-left { width: 360px; flex-shrink: 0; display: flex; flex-direction: column;
+            gap: 12px; overflow-y: auto; }
+.col-left .panel { flex-shrink: 0; }
+.col-right { flex: 1; display: flex; min-width: 0; }
+.video-panel { flex: 0 0 55%; min-width: 140px; }
+.map-panel { flex: 1 1 auto; min-width: 140px; }
+.splitter { flex: 0 0 12px; cursor: col-resize; position: relative; touch-action: none; }
+.splitter::before {
+  content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px;
+  background: var(--line); border-radius: 2px;
+}
+.splitter:hover::before, .splitter.drag::before { background: var(--accent); width: 3px; left: 4px; }
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; min-height: 0; display: flex; flex-direction: column;
+}
+.panel h2 {
+  margin: 0 0 10px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--dim); font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.tele-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; }
+.kv { display: flex; justify-content: space-between; align-items: baseline;
+      background: var(--panel2); padding: 5px 9px; border-radius: 6px; }
+.kv.wide { grid-column: 1 / -1; }
+.kv span { color: var(--dim); font-size: 12px; }
+.kv b { font-variant-numeric: tabular-nums; font-weight: 600; }
+#p-gbph { color: var(--accent); }
+.pill { padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+.pill-good { background: rgba(46,204,113,.18); color: var(--good); }
+.pill-warn { background: rgba(241,196,15,.18); color: var(--warn); }
+.pill-bad  { background: rgba(231,76,60,.18); color: var(--bad); }
+
+.row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.btn {
+  flex: 1; padding: 9px; border: 1px solid var(--line); background: var(--panel2);
+  color: var(--txt); border-radius: 7px; cursor: pointer; font-weight: 600;
+}
+.btn:hover { border-color: var(--accent); }
+.btn-arm { background: rgba(46,204,113,.15); color: var(--good); }
+.btn-disarm { background: rgba(231,76,60,.15); color: var(--bad); }
+/* Avstängning är dämpad tills muspekaren är på den — den ska inte konkurrera
+   visuellt med DISARMERA, som är knappen man vill träffa när det bränner. */
+.btn-shutdown { background: transparent; color: var(--dim); border-color: var(--line); }
+.btn-shutdown:hover { background: rgba(231,76,60,.15); color: var(--bad); border-color: var(--bad); }
+.btn-shutdown[disabled] { opacity: .5; cursor: default; }
+select { background: var(--panel2); color: var(--txt); border: 1px solid var(--line);
+         border-radius: 6px; padding: 7px; flex: 1; }
+label { display: flex; gap: 8px; align-items: center; flex: 1; color: var(--dim); }
+.auto-box { background: rgba(55,182,255,.07); border: 1px solid var(--line);
+            border-radius: 8px; padding: 8px; margin-bottom: 10px; }
+.auto-box .kv { background: transparent; padding: 2px 2px 6px; }
+.auto-box .row { margin-bottom: 0; }
+#t-curwp { color: var(--accent); font-size: 16px; }
+#wp-input { width: 74px; flex: 0 0 auto; background: var(--panel2); color: var(--txt);
+            border: 1px solid var(--line); border-radius: 6px; padding: 7px; }
+
+.note { font-size: 11px; color: var(--dim); margin: 4px 0 8px; }
+.note.hot { color: var(--warn); }
+
+.gain-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.gain-row label { flex: 0 0 auto; color: var(--dim); }
+.gain-row b { flex: 0 0 44px; text-align: right; font-variant-numeric: tabular-nums; }
+#gain { flex: 1; height: 5px; -webkit-appearance: none; appearance: none;
+        background: var(--panel2); border-radius: 3px; outline: none; }
+#gain::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px;
+        border-radius: 50%; background: var(--accent); cursor: pointer; border: 2px solid #0b1015; }
+#gain::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent);
+        cursor: pointer; border: 2px solid #0b1015; }
+
+.dpad {
+  display: grid; gap: 6px; width: 168px; margin: 2px auto 0;
+  grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 44px);
+  grid-template-areas: ".  up  ." "left mid right" ".  down .";
+}
+.drive {
+  font-size: 20px; border: 1px solid var(--line); background: var(--panel2);
+  color: var(--txt); border-radius: 8px; cursor: pointer; user-select: none;
+  touch-action: none;
+}
+.drive:active, .drive.held { background: var(--accent); color: #001; border-color: var(--accent); }
+.drive.stop { color: var(--bad); }
+.dpad.disabled .drive { opacity: .35; pointer-events: none; }
+
+.msgs { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.msg { font-size: 11px; padding: 4px 7px; border-radius: 5px; background: var(--panel2);
+       font-family: ui-monospace, monospace; }
+.msg.sev-bad { background: rgba(231,76,60,.18); color: var(--bad); }
+.msg.sev-warn { background: rgba(241,196,15,.16); color: var(--warn); }
+.msg.sev-dim { color: var(--dim); }
+
+.video-panel, .map-panel { padding: 12px; }
+.vid-wrap { flex: 1; position: relative; min-height: 0; display: flex; }
+#video { flex: 1; width: 100%; min-height: 0; background: #000; border-radius: 8px; object-fit: contain; }
+/* Överlägget ligger ovanpå videon och släpper igenom all inmatning — annars
+   skulle det äta klick avsedda för videopanelen. */
+#cv-overlay { position: absolute; inset: 0; width: 100%; height: 100%;
+              pointer-events: none; border-radius: 8px; }
+/* Hinderdetekteringen under videon: radar till vänster, siffror till höger.
+   flex: 0 0 auto så att den inte tar höjd från videon när panelen krymper. */
+.cv-bar { display: flex; gap: 10px; align-items: flex-start; margin-top: 8px;
+          flex: 0 0 auto; flex-wrap: wrap; }
+/* Dubbelt så stor som ursprungligen (240 -> 480 px). Får den inte plats bredvid
+   siffrorna viker de ned under i stället för att klämma ihop radarn. */
+/* Radarns storlek styrs av --radar-w (satt inline på .video-panel av dragningen).
+   Variabeln på FÖRÄLDERN i stället för width direkt här gör att media-frågan för
+   smala skärmar (width:100% nedan) fortfarande vinner — inline width hade slagit
+   den. Kvadratisk (height:auto följer den 600x600 bitmap-ritade canvasen). */
+#cv-radar { flex: 0 0 auto; width: var(--radar-w, 480px); max-width: 100%; height: auto;
+            background: #0b1016; border: 1px solid var(--line); border-radius: 8px; }
+/* Radarn + dess förklaring/lagerväljare i en kolumn. */
+.radar-col { flex: 0 0 auto; display: flex; flex-direction: column; max-width: 100%; }
+.radar-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; }
+.radar-legend .chk { gap: 4px; }
+.radar-legend .ldot { font-size: 14px; line-height: 1; }
+/* Vågrätt draghandtag ovanför radarn — samma roll som .splitter mellan kolumnerna,
+   fast lodrät dragning (row-resize) som ändrar radarns storlek och därmed hur mycket
+   höjd videon får. */
+.hsplitter { flex: 0 0 10px; height: 10px; cursor: row-resize; position: relative;
+             touch-action: none; margin-top: 4px; }
+.hsplitter::before {
+  content: ""; position: absolute; top: 4px; left: 0; right: 0; height: 2px;
+  background: var(--line); border-radius: 2px;
+}
+.hsplitter:hover::before, .hsplitter.drag::before { background: var(--accent); height: 3px; top: 3px; }
+.cv-info { flex: 1; min-width: 200px; }
+.cv-info h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--dim);
+              display: flex; align-items: center; gap: 8px; }
+/* Diagnostikraden: allt som är bra att se men inte värt en egen ruta.
+   Bryts över flera rader hellre än att klippas — ett avklippt tal är värre
+   än inget tal. */
+.cv-diag { margin-top: 6px; line-height: 1.5; word-break: break-word; }
+.pill-dim { background: rgba(255,255,255,.07); color: var(--dim); }
+/* Lidar-sektionen sitter under kamerans info i samma ruta — en tunn linje ovanför
+   markerar att det är en ANNAN sensor, inte fler kamera-siffror. */
+.lidar-h { margin-top: 12px !important; padding-top: 10px;
+           border-top: 1px solid var(--line); }
+.lidar-ctrl { margin-top: 8px; }
+/* Bumper-träffindikator V/H: dämpad när fri, lyser rött vid träff (eller
+   kabelbrott — fail-safe läses som träff). */
+.bump-dot { display: inline-block; min-width: 18px; padding: 1px 5px; border-radius: 4px;
+            text-align: center; font-weight: 700; color: var(--dim);
+            background: rgba(255,255,255,.07); }
+.bump-dot.hit { color: #fff; background: var(--bad); }
+/* Stereotjänstens bild ersätter videon när stereo kör (mediamtx är då
+   stoppad och videoelementet svart). Samma ram och object-fit som videon så
+   att panelen inte hoppar när man växlar mellan dem. */
+#stereo-img { position: absolute; inset: 0; width: 100%; height: 100%;
+              object-fit: contain; background: #000; border-radius: 8px;
+              display: none; }
+@media (max-width: 900px) {
+  .cv-bar { flex-wrap: wrap; }
+  #cv-radar { max-width: 100%; width: 100%; }
+}
+#map { flex: 1; width: 100%; min-height: 0; border-radius: 8px; }
+.rover-marker { font-size: 34px; color: #ff2d2d; line-height: 1;
+                text-shadow: 0 0 2px #000, 0 0 4px #000, 0 0 2px #fff; transition: transform .2s; }
+.wp-marker { width: 22px; height: 22px; border-radius: 50%; background: #2d8fff;
+             color: #fff; font-size: 11px; font-weight: 700; display: flex;
+             align-items: center; justify-content: center; border: 2px solid #10406e;
+             box-shadow: 0 0 3px rgba(0,0,0,.6); }
+.wp-marker.home { width: auto; height: 20px; padding: 0 8px; border-radius: 10px;
+                  background: #2ecc71; color: #06371c; border-color: #14663a; font-size: 10px; }
+.wp-marker.fence { width: auto; height: 20px; padding: 0 8px; border-radius: 10px;
+                   background: #a855f7; color: #fff; border-color: #5b2a86; font-size: 10px; }
+.wp-marker.rally { background: #f59e0b; color: #3a2600; border-color: #8a5a00; }
+.map-ctrl { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.map-ctrl .spacer { flex: 1; }
+.chk { display: flex; align-items: center; gap: 6px; color: var(--txt); cursor: pointer; user-select: none; }
+.btn.small { flex: 0 0 auto; padding: 6px 11px; font-size: 12px; }
+#basemap { flex: 0 0 auto; padding: 5px 8px; font-size: 12px; }
+
+.vid-ctrl { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+/* Väljare video/hinderbild (V4.6). Ett segmenterat par knappar. */
+.segmented { display: inline-flex; flex: 0 0 auto; border: 1px solid var(--line);
+             border-radius: 6px; overflow: hidden; }
+.seg { background: transparent; color: var(--dim); border: none; padding: 5px 11px;
+       font-size: 12px; cursor: pointer; }
+.seg + .seg { border-left: 1px solid var(--line); }
+.seg.on { background: rgba(55,182,255,.18); color: var(--accent); }
+.vid-ctrl .spacer { flex: 1; }
+.vid-ctrl select { flex: 0 0 auto; padding: 5px 8px; font-size: 12px; }
+.dim { color: var(--dim); font-size: 12px; }
+
+/* Nätverk (WiFi)-panelen */
+#wifi-ssid { color: var(--accent); }
+.wifi-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px; }
+.wifi-row { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+            background: var(--panel2); padding: 5px 9px; border-radius: 6px; }
+.wifi-row.active { background: rgba(46,204,113,.10); }
+.wifi-name { font-size: 12px; word-break: break-all; }
+.wifi-btns { display: flex; gap: 4px; flex: 0 0 auto; }
+.wifi-add { margin: 2px 0 4px; }
+.wifi-add summary { cursor: pointer; font-size: 12px; color: var(--accent); padding: 4px 0; }
+.wifi-in { width: 100%; background: var(--panel2); color: var(--txt); border: 1px solid var(--line);
+           border-radius: 6px; padding: 7px; margin-bottom: 8px; }
+.note.sev-bad { color: var(--bad); }
+
+@media (max-width: 900px) {
+  main { flex-direction: column; overflow-y: auto; }
+  .col-left { width: auto; }
+  .col-right { flex-direction: column; }
+  .video-panel, .map-panel { flex: 0 0 300px; }
+  .splitter { display: none; }
+  /* Radarn tar full bredd på smala skärmar (se #cv-radar-regeln) → dra-handtaget
+     är meningslöst där. */
+  .hsplitter { display: none; }
+}

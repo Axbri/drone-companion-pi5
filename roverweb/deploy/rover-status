@@ -1,0 +1,120 @@
+#!/home/axel/mav-venv/bin/python
+"""rover-status — snabb hälsokoll på companion-datorn inför/under fält.
+Läser telemetri passivt via mavproxy fan-out (udp:127.0.0.1:14551), stör inget.
+
+Användning:
+  rover-status            engångsutskrift
+  rover-status -w [sek]   watch-läge, uppdaterar var [sek] sekund (default 2)
+"""
+import sys, time, socket, subprocess, json, urllib.request
+from pymavlink import mavutil
+
+C = {'g':'92','r':'91','y':'93','b':'96','d':'90'}
+TTY = sys.stdout.isatty()
+def c(s, col):
+    return "\033[%sm%s\033[0m" % (C[col], s) if TTY else str(s)
+
+def sysd(unit):
+    a = subprocess.run(["systemctl","is-active",unit],
+                       capture_output=True, text=True).stdout.strip()
+    return c(a, 'g' if a == 'active' else 'r')
+
+def tcp_ok(host, port, timeout=2):
+    try:
+        socket.create_connection((host, port), timeout).close(); return True
+    except Exception:
+        return False
+
+def video_line():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9997/v3/paths/list", timeout=2) as r:
+            items = json.load(r).get("items", [])
+        p = next((x for x in items if x["name"] == "rover"), None)
+        if p and p.get("ready"):
+            return "%s  läsare: %d" % (c("online", 'g'), len(p.get("readers", [])))
+        return c("ej redo", 'y')
+    except Exception:
+        return "%s (API svarar ej)" % c("okänd", 'y')
+
+FIX = {0:"ingen",1:"ingen",2:"2D",3:"3D",4:"DGPS",5:"RTK-Float",6:"RTK-Fixed",7:"static",8:"PPP"}
+
+def collect(m, secs=2.5):
+    m.mav.heartbeat_send(6, 8, 0, 0, 0)          # knacka på så fan-out lär sig oss
+    data = {}; t = time.time()
+    while time.time() - t < secs:
+        msg = m.recv_match(blocking=True, timeout=1)
+        if msg:
+            data[msg.get_type()] = msg
+    return data
+
+def report(m):
+    lines = []
+    lines.append("%s %s" % (c("── roverpi status ──", 'b'), time.strftime("%Y-%m-%d %H:%M:%S")))
+    lines.append("tjänster : mavproxy %s   mediamtx %s   tailscaled %s"
+                 % (sysd("mavproxy"), sysd("mediamtx"), sysd("tailscaled")))
+    hb = tcp_ok("homebase", 2101)
+    lines.append("RTK-bas  : homebase:2101/LOCAL  %s" % (c("nåbar", 'g') if hb else c("EJ nåbar", 'r')))
+    lines.append("video    : " + video_line())
+
+    data = collect(m)
+    if "HEARTBEAT" not in data:
+        lines.append("FC-länk  : %s  (ingen heartbeat på udp:14551 — kör mavproxy.service?)" % c("NER", 'r'))
+        return "\n".join(lines)
+
+    lines.append("FC-länk  : %s   mode %s   %s"
+                 % (c("UPP", 'g'), c(m.flightmode, 'b'),
+                    c("ARMED", 'r') if m.motors_armed() else c("disarmed", 'g')))
+
+    g = data.get("GPS_RAW_INT")
+    if g:
+        ft = g.fix_type
+        col = 'g' if ft >= 6 else ('y' if ft >= 4 else 'r')
+        hdop = g.eph / 100.0 if g.eph not in (0, 65535) else -1
+        lines.append("GPS      : %s   sats %d   HDOP %.2f"
+                     % (c(FIX.get(ft, str(ft)), col), g.satellites_visible, hdop))
+
+    gp = data.get("GLOBAL_POSITION_INT")
+    if gp:
+        lines.append("position : %.7f, %.7f   alt %.1f m" % (gp.lat/1e7, gp.lon/1e7, gp.relative_alt/1000.0))
+
+    s = data.get("SYS_STATUS")
+    if s and s.voltage_battery != 65535:
+        v = s.voltage_battery / 1000.0
+        a = s.current_battery / 100.0 if s.current_battery != -1 else 0.0
+        # Rovern ar 4S — hardkodat, inte gissat. Heuristiken round(v/3.7) foll
+        # sonder precis nar den behovde vara ratt: ett FULLADDAT 4S ligger pa
+        # 16,8 V, vilket ger round(4,54)=5 och da rapporterades "5S 3,36 V/cell"
+        # — ett fulladdat batteri som ser nastan tomt ut. Fel at det hall som
+        # far en att avbryta en korning i onodan, eller varre, att lita pa ett
+        # trott batteri for att siffran rakade se rimlig ut.
+        cells = 4
+        vpc = v / cells
+        vcol = 'g' if vpc >= 3.75 else ('y' if vpc >= 3.5 else 'r')
+        lines.append("batteri  : %s V   %.1f A   %d%%   (%dS ~%.2f V/cell)"
+                     % (c("%.2f" % v, vcol), a, s.battery_remaining, cells, vpc))
+
+    vh = data.get("VFR_HUD")
+    if vh:
+        lines.append("rörelse  : %.1f m/s   heading %d°" % (vh.groundspeed, vh.heading))
+    return "\n".join(lines)
+
+def main():
+    watch = len(sys.argv) > 1 and sys.argv[1] in ("-w", "--watch", "watch")
+    interval = float(sys.argv[2]) if watch and len(sys.argv) > 2 else 2.0
+    try:
+        m = mavutil.mavlink_connection("udpout:127.0.0.1:14551")
+    except Exception as e:
+        print(c("kan inte öppna udp:14551: %s" % e, 'r')); sys.exit(1)
+    if not watch:
+        print(report(m)); return
+    try:
+        while True:
+            out = report(m)
+            sys.stdout.write("\033[2J\033[H" if TTY else "\n")  # rensa skärm
+            sys.stdout.write(out + "\n"); sys.stdout.flush()
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        pass
+
+if __name__ == "__main__":
+    main()

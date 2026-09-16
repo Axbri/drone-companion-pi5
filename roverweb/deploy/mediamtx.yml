@@ -1,0 +1,11 @@
+logLevel: info
+api: yes
+paths:
+  rover:
+    source: rpiCamera
+    rpiCameraMode: 1640:1232:10:P
+    rpiCameraWidth: 1280
+    rpiCameraHeight: 960
+    rpiCameraFPS: 30
+    rpiCameraBitrate: 2949120
+    rpiCameraIDRPeriod: 15
