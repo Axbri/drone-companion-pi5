@@ -563,6 +563,14 @@ within 1–10 cm** despite wind (median tilt below 2 m 1.5–1.8° vs 0.5–0.8�
   Confirm from the dataflash `PL` messages if it matters.
 - Loop 23.5 Hz median (p10 9.7, grass at low AGL), latency 49 ms median.
 
+## Moving-target mode (2026-09-16, not yet flight-tested)
+
+Web switch "Target mode → Moving pad" in the precland tab. Off = everything above, unchanged.
+On = no RTK-hold cut-off, marker range as `LANDING_TARGET.distance`, and Pi-side coasting
+(pad velocity tracked in the FC's local NED frame, extrapolated target sent after the marker is
+lost). Design, FC parameters (`PLND_OPTIONS=7` etc.), CSV columns and the test ladder:
+[`MOVING-TARGET-LANDING.md`](MOVING-TARGET-LANDING.md).
+
 ## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
 - **TF-Luna AGL=None en stor del av flygningen** (se Flygtest #6) — varför, och går det åtgärda?

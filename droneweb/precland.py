@@ -262,6 +262,127 @@ def _marker_up_vector(corners):
     return ((p[0] + p[1]) - (p[2] + p[3])) / 2.0
 
 
+# ---- moving-target mode: pad tracker + coasting -------------------------
+# ArduPilot's precland EKF (PLND_EST_TYPE=1) estimates the target's velocity itself and,
+# with PLND_OPTIONS bit 0 ("Moving Landing Target"), feeds it forward in LAND — so the
+# Pi does NOT need to do any velocity control. What the Pi adds (MOVING-TARGET-LANDING.md):
+#   1. no RTK-hold cut-off (every sighting in the last metre resets the FC's target-lost
+#      timer, which is a hard-coded 2 s in AC_PrecLand, not PLND_TIMEOUT);
+#   2. the marker's own range as LANDING_TARGET.distance (the pad is raised — the lidar
+#      reads the ground beside it until the drone is right over it);
+#   3. coasting: the pad's position is tracked in the FC's local NED frame (each sighting
+#      = drone position + rotated line-of-sight, LOCAL_POSITION_NED + ATTITUDE from the FC),
+#      its velocity fitted over a short window, and when the marker leaves the frame in the
+#      final descent the Pi keeps sending LANDING_TARGET toward the extrapolated pad position
+#      (constant velocity) for up to `coast_s`. The FC then never sees a gap, and its own
+#      dead reckoning is the backup, not the only thing holding the landing together.
+# The tracker runs in both modes (a static pad should read ~0 m/s — a free sanity check);
+# only points 1-3 are gated on the mode switch.
+PAD_WINDOW_S = 1.5        # velocity fit window (s). Longer = smoother, slower to follow a
+                          # speed change; at 13-20 Hz this is 20-30 samples.
+PAD_MIN_SAMPLES = 6
+PAD_MIN_SPAN_S = 0.5      # no velocity until the samples span at least this long
+NED_MAX_AGE_S = 0.5       # LOCAL_POSITION_NED older than this → no pad update (FC link hiccup)
+COAST_DEFAULT_S = 3.0     # how long to keep sending after the marker is lost (moving mode)
+COAST_MIN_S, COAST_MAX_S = 0.0, 8.0
+COAST_MIN_DOWN_M = 0.05   # don't synthesise a target that isn't below the drone
+
+
+def _rot_body_to_ned(roll_deg, pitch_deg, yaw_deg):
+    """Body (FRD) → NED direction-cosine matrix, Rz(yaw)·Ry(pitch)·Rx(roll)."""
+    r, p, y = (math.radians(v) for v in (roll_deg, pitch_deg, yaw_deg))
+    cr, sr, cp, sp, cy, sy = math.cos(r), math.sin(r), math.cos(p), math.sin(p), math.cos(y), math.sin(y)
+    return np.array([[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                     [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                     [-sp, cp * sr, cp * cr]])
+
+
+class PadTracker:
+    """Pad position + velocity in the FC's local NED frame from marker sightings.
+
+    add(): one sighting → pad_ned = drone_ned + R_bn · pad_body (pad_body = target rel. CG,
+    FRD, metres). Kept in a sliding window; velocity = least-squares line through the
+    window's N/E samples (robust to per-frame LOS noise). predict(t) extrapolates the
+    fitted line to t at constant velocity; the pad's D is taken as the window mean (a
+    pad doesn't move vertically)."""
+
+    def __init__(self):
+        self._s = []                       # (t, n, e, d)
+        self._fit = None                   # (t_ref, n0, e0, vn, ve, d_mean) or None
+
+    def add(self, t, pad_body, drone_ned, R):
+        p = np.asarray(drone_ned, np.float64) + R @ np.asarray(pad_body, np.float64)
+        self._s.append((t, float(p[0]), float(p[1]), float(p[2])))
+        self._s = [x for x in self._s if t - x[0] <= PAD_WINDOW_S]
+        self._refit()
+        return p
+
+    def _refit(self):
+        s = self._s
+        if len(s) < PAD_MIN_SAMPLES or s[-1][0] - s[0][0] < PAD_MIN_SPAN_S:
+            self._fit = None
+            return
+        a = np.array(s)
+        t_ref = a[-1, 0]
+        (vn, ve), (n0, e0) = np.polyfit(a[:, 0] - t_ref, a[:, 1:3], 1)
+        self._fit = (t_ref, float(n0), float(e0), float(vn), float(ve), float(a[:, 3].mean()))
+
+    def last_t(self):
+        return self._s[-1][0] if self._s else None
+
+    def velocity(self):
+        """(vn, ve) m/s or None if the window is too short for a fit."""
+        return self._fit[3:5] if self._fit else None
+
+    def predict(self, t):
+        """Pad NED position at time t from the fit, or None."""
+        if not self._fit:
+            return None
+        t_ref, n0, e0, vn, ve, d = self._fit
+        dt = t - t_ref
+        return np.array([n0 + vn * dt, e0 + ve * dt, d])
+
+    def status(self):
+        v = self.velocity()
+        out = {"samples": len(self._s), "speed": None, "heading": None, "vn": None, "ve": None}
+        if v:
+            out.update(speed=round(math.hypot(*v), 2),
+                       heading=round(math.degrees(math.atan2(v[1], v[0])) % 360.0),
+                       vn=round(v[0], 2), ve=round(v[1], 2))
+        return out
+
+
+def _drone_ned_at(tel_snap, t):
+    """Drone NED position (3,), R_bn and source ("ned"/"bench") at time t from the telemetry
+    snapshot, velocity-extrapolated from the last LOCAL_POSITION_NED. None if missing/stale.
+    Bench fallback: the FC only sends LOCAL_POSITION_NED once the EKF has a horizontal
+    position (indoors it sits in constant-position mode, checked 2026-09-16), so while
+    DISARMED and without NED the drone is taken as stationary at the origin — lets the pad
+    tracker/coasting be exercised on the bench by sliding the pad. Never used when armed:
+    a moving drone treated as static would read as pad velocity."""
+    ned, ned_t = tel_snap.get("ned"), tel_snap.get("ned_t")
+    roll, pitch, yaw = tel_snap.get("roll"), tel_snap.get("pitch"), tel_snap.get("yaw")
+    if None in (roll, pitch, yaw):
+        return None
+    R = _rot_body_to_ned(roll, pitch, yaw)
+    if ned is not None and ned_t is not None and abs(t - ned_t) <= NED_MAX_AGE_S:
+        dt = t - ned_t
+        return np.array([ned[0] + ned[3] * dt, ned[1] + ned[4] * dt, ned[2] + ned[5] * dt]), R, "ned"
+    if tel_snap.get("armed") is False:
+        return np.zeros(3), R, "bench"
+    return None
+
+
+def _los_from_ned(rel_ned, R):
+    """Relative NED vector → (angle_x, angle_y, distance, body_vec) in the LANDING_TARGET
+    convention (inverse of AC_PrecLand_MAVLink: vec_body = (-tan(ay), tan(ax), 1)). None
+    if the target is not below the drone."""
+    b = R.T @ rel_ned
+    if b[2] < COAST_MIN_DOWN_M:
+        return None
+    return math.atan2(b[1], b[2]), math.atan2(-b[0], b[2]), float(np.linalg.norm(b)), b
+
+
 class PrecLandDetector:
     def __init__(self):
         params = cv2.aruco.DetectorParameters()
@@ -280,12 +401,21 @@ class PrecLandDetector:
                 return Target(float(u), float(v), "aruco", aruco_id=int(i), corners=pts)
         return None
 
-    def annotate(self, bgr, target, phase=None, agl=None, text=True):
+    def annotate(self, bgr, target, phase=None, agl=None, text=True, coast_uv=None):
         """Ritar bildanalys-grafiken (visas i webben). `bgr` är en gråskalebild
         konverterad till 3-kanalig (cv2.COLOR_GRAY2BGR) bara för att overlayn ska
-        synas i färg — själva bilden bär ingen kulörinformation."""
+        synas i färg — själva bilden bär ingen kulörinformation.
+        coast_uv: predicted pad pixel while coasting (moving mode, marker lost) — drawn
+        as a yellow circle so the extrapolation can be judged against the video."""
         cv2.drawMarker(bgr, (int(CX), int(CY)), (120, 120, 120),
                        cv2.MARKER_CROSS, 20, 1)
+        if coast_uv is not None:
+            u, v = int(round(coast_uv[0])), int(round(coast_uv[1]))
+            u, v = max(-10**6, min(10**6, u)), max(-10**6, min(10**6, v))   # clipLine-safe
+            cv2.circle(bgr, (u, v), 24, (0, 220, 255), 2)
+            cv2.line(bgr, (int(CX), int(CY)), (u, v), (0, 220, 255), 1)
+            cv2.putText(bgr, "COAST", (8, bgr.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (0, 220, 255), 2)
         if target is not None:
             u, v = int(target.u), int(target.v)
             # Grön = ARUCO-fasen (aktivt styrande). Röd = WAIT/RTK-HOLD — detektering
@@ -379,8 +509,12 @@ REC_DIR = "/home/axel/recordings"
 CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
               "fix,sats,phase,source,ox,oy,ax_deg,ay_deg,sent,scale,"
               "yaw_err_deg,yaw_cmd_deg,yaw_align,loop_hz,latency_ms,"
-              "agl_src,mrange,magl\n")     # agl = effective (lidar or marker); mrange = marker
+              "agl_src,mrange,magl,"       # agl = effective (lidar or marker); mrange = marker
                                          # line-of-sight range, magl = marker-derived AGL
+              "moving,gs,dn,de,dd,pn,pe,pd,pvn,pve\n")
+              # moving = target mode (1 = moving pad); gs = FC groundspeed; dn/de/dd = drone
+              # local NED at the frame time; pn/pe/pd = pad NED for this sighting (or the
+              # coasted prediction when source = "coast"); pvn/pve = fitted pad velocity.
 
 
 def _f(v, nd=3):
@@ -465,6 +599,12 @@ class PrecLandController:
         self._yaw_align = True                # av = ingen CONDITION_YAW skickas alls
         self._yaw_rate = self.YAW_RATE_DEFAULT
         self._last_yaw_tx = 0.0
+        # Target mode (web switch): False = static pad, exactly the flight-proven behaviour.
+        # True = moving pad, see the "moving-target mode" comment block above PadTracker.
+        self._moving = False
+        self._coast_s = COAST_DEFAULT_S
+        self._pad = PadTracker()
+        self._coast_ok = False                # last sighting was actively sent → may coast
         self._lat_ms = None                   # Pi-latens (kamera-fångst → skick), EWMA
         self._loop_hz = None                  # verklig loop-takt, EWMA
         self._last_tick = None
@@ -473,7 +613,7 @@ class PrecLandController:
                         "marker_range": None,
                         "offset": None, "tx": 0, "sent": False, "rec_file": None,
                         "calib": None, "latency_ms": None, "loop_hz": None,
-                        "yaw_err_deg": None}
+                        "yaw_err_deg": None, "pad": None}
         self._apply_exposure()
         threading.Thread(target=self._run, daemon=True).start()
         threading.Thread(target=self._writer_loop, daemon=True).start()
@@ -535,6 +675,19 @@ class PrecLandController:
             self._yaw_rate = float(max(self.YAW_RATE_MIN, min(self.YAW_RATE_MAX, rate_degs)))
         return self.yaw_align_status()
 
+    def target_mode_status(self):
+        return {"moving": self._moving, "coast_s": round(self._coast_s, 1)}
+
+    def set_target_mode(self, moving=None, coast_s=None):
+        """Static pad (default, unchanged behaviour) vs moving pad. Live. coast_s = how
+        long to keep sending an extrapolated target after the marker is lost in moving
+        mode (0 = off, rely on the FC's own 2 s dead reckoning)."""
+        if moving is not None:
+            self._moving = bool(moving)
+        if coast_s is not None:
+            self._coast_s = float(max(COAST_MIN_S, min(COAST_MAX_S, coast_s)))
+        return self.target_mode_status()
+
     def set_exposure(self, auto=None, exposure_us=None, gain=None):
         """Ställ CV-exponering live från webben (fältjustering). Klämmer värden och
         applicerar direkt."""
@@ -563,6 +716,7 @@ class PrecLandController:
         s["cam_offset"] = self.cam_offset_status()
         s["yaw_align"] = self.yaw_align_status()
         s["thresholds"] = self.threshold_status()
+        s["target_mode"] = self.target_mode_status()
         rf = self.rf.status() if self.rf else {"ok": False}
         s["rangefinder_ok"] = rf.get("ok", False)
         return s
@@ -595,6 +749,13 @@ class PrecLandController:
         yuv, sensor_ts = self.cam.capture_ts()
         gray = yuv[:CV_H, :CV_W]
         tel_snap = self.tel.snapshot()
+        # Wall-clock time of the exposure (for the pad tracker: the drone position must be
+        # taken at the same instant as the sighting, not at send time — 2 m/s × 50 ms = 10 cm).
+        t_frame = time.time()
+        if sensor_ts:
+            age = time.clock_gettime(time.CLOCK_BOOTTIME) - sensor_ts / 1e9
+            if 0 <= age < 2.0:
+                t_frame -= age
 
         # Stoppa inspelning automatiskt vid disarm (kant-triggat: bara True→False, inte
         # "är för tillfället disarmerad" — annars skulle det aldrig gå att spela in på
@@ -624,13 +785,14 @@ class PrecLandController:
             tilt = (math.cos(math.radians(roll)) * math.cos(math.radians(pitch))
                     if roll is not None and pitch is not None else 1.0)
             magl = mrange[1] * max(tilt, 0.5)
-        if agl is not None:
-            agl_eff, agl_src = agl, "lidar"
-        elif magl is not None:
-            agl_eff, agl_src = magl, "marker"
-        else:
-            agl_eff, agl_src = None, None
-        phase = self._decide_phase(agl_eff)
+        # Effective AGL. Static mode: lidar first (flight-proven). Moving mode: marker
+        # first — the pad is raised, the lidar reads the ground beside it until the drone is
+        # right over it, and it is the height above the PAD that the phase logic and the
+        # camera-offset compensation need.
+        moving = self._moving
+        cands = [("marker", magl), ("lidar", agl)] if moving else [("lidar", agl), ("marker", magl)]
+        agl_src, agl_eff = next(((s, v) for s, v in cands if v is not None), (None, None))
+        phase = self._decide_phase(agl_eff, moving)
 
         # Gråskala→BGR bara för overlay-färg i förhandsvisning/inspelning (cvtColor
         # GRAY2BGR är en billig kanal-replikering, inte en riktig färgkonvertering —
@@ -646,17 +808,33 @@ class PrecLandController:
         bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR) if need_video else None
 
         ax = ay = ax_s = ay_s = ox = oy = yaw_err_deg = yaw_cmd_deg = None
-        sent = False
+        sent = coasting = False
+        coast_uv = drone_ned = pad_ned = None
+        dr = _drone_ned_at(tel_snap, t_frame)            # (pos, R_bn, src) or None if stale/missing
+        m_los, m_axis = (mrange[0], mrange[1]) if mrange else (None, None)
         if target is not None:
             ax, ay = target.angles()                      # rå, kamerans egen mätning (kalibrering)
             ax_s, ay_s = _apply_cam_offset(ax, ay, agl_eff, self._cam_offset_m)  # korrigerad, CG-referens
             ox, oy = target.offset_norm()
+
+            # Pad tracker (both modes): target rel. CG in body FRD from the raw camera angles
+            # and the along-axis distance — true geometry, unlike the FOV-tapered ax_s/ay_s.
+            # The lidar is body-fixed too, so its reading is also along the camera axis.
+            d_axis = (m_axis or agl) if moving else (agl or m_axis)
+            if d_axis and dr is not None:
+                pad_body = (-math.tan(ay) * d_axis + self._cam_offset_m, math.tan(ax) * d_axis, d_axis)
+                drone_ned, R, _ = dr
+                pad_ned = self._pad.add(t_frame, pad_body, drone_ned, R)
+            self._coast_ok = phase == PHASE_ARUCO         # only an actively-sent sighting may start a coast
+
             if phase == PHASE_ARUCO:
                 k = self._cmd_scale                      # styrskala: mildare korrektion
                 # distance: ArduPilot uses it instead of its rangefinder when > 0
-                # (AC_PrecLand::construct_pos_meas_using_rangefinder). Lidar AGL when valid
-                # (flight-proven), else the marker's line-of-sight range; 0 if neither.
-                dist = agl if agl else (mrange[0] if mrange else 0.0)
+                # (AC_PrecLand::construct_pos_meas_using_rangefinder). Static: lidar AGL when
+                # valid (flight-proven), else the marker's line-of-sight range. Moving: marker
+                # range first (raised pad — lidar AGL would overstate it and act as extra
+                # gain), lidar as fallback. 0 if neither.
+                dist = ((m_los or agl) if moving else (agl or m_los)) or 0.0
                 self.tel.send_landing_target(ax_s * k, ay_s * k, dist)
                 sent = True
                 self._tx += 1
@@ -677,6 +855,26 @@ class PrecLandController:
                         if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
                             self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
                             self._last_yaw_tx = now_yaw
+        elif moving and self._coast_s > 0 and self._coast_ok and dr is not None:
+            # Marker lost in moving mode: coast. Extrapolate the pad at its fitted velocity
+            # and keep the FC fed with a synthetic LANDING_TARGET for at most coast_s after
+            # the last sighting, so its (hard-coded 2 s) target-lost timer never fires in the
+            # final blind descent. Bounded: no fit, no fresh NED, or too old → nothing sent.
+            last_t = self._pad.last_t()
+            pred = self._pad.predict(t_frame) if last_t is not None and t_frame - last_t <= self._coast_s else None
+            if pred is not None:
+                drone_ned, R, _ = dr
+                los = _los_from_ned(pred - drone_ned, R)
+                if los is not None:
+                    ax_s, ay_s, dist, b = los
+                    self.tel.send_landing_target(ax_s * self._cmd_scale, ay_s * self._cmd_scale, dist)
+                    sent = coasting = True
+                    self._tx += 1
+                    pad_ned = pred
+                    # where the camera (16.5 cm behind CG) would see it — for the overlay
+                    coast_uv = (CX + FX * b[1] / b[2], CY - FY * (b[0] - self._cam_offset_m) / b[2])
+            if not coasting:
+                self._coast_ok = False
 
         # kamerakalibrering: implied markavstånd (cm) = agl*tan(vinkel), och uppmätt
         # brännvidd ur ArUco-markörens px-storlek + känd fysisk storlek + agl.
@@ -703,33 +901,42 @@ class PrecLandController:
             if 0 <= lat < 2000:
                 self._lat_ms = lat if self._lat_ms is None else 0.8 * self._lat_ms + 0.2 * lat
 
+        pad_st = self._pad.status()
+        last_t = self._pad.last_t()
+        pad_st.update(age=(round(t_frame - last_t, 1) if last_t is not None else None),
+                      coasting=coasting, ned_src=(dr[2] if dr is not None else None))
+        source = "coast" if coasting else (target.source if target else None)
         with self._st_lock:
             self._status.update(
-                phase=phase, source=(target.source if target else None),
+                phase=phase, source=source,
                 agl=(round(agl_eff, 2) if agl_eff is not None else None), agl_src=agl_src,
                 marker_range=(round(mrange[0], 2) if mrange else None),
                 offset=([round(ox, 3), round(oy, 3)] if target else None),
-                tx=self._tx, sent=sent, calib=calib,
+                tx=self._tx, sent=sent, calib=calib, pad=pad_st,
                 yaw_err_deg=(round(yaw_err_deg, 1) if yaw_err_deg is not None else None),
                 latency_ms=(round(self._lat_ms, 1) if self._lat_ms else None),
                 loop_hz=(round(self._loop_hz, 1) if self._loop_hz else None),
             )
 
-        # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg). `sent`
-        # skickas inte med — _row() räknar om den (phase != RTK and target) själv.
-        # ax_s/ay_s (kamera-offset-korrigerade, det som faktiskt skickades) loggas i
-        # CSV:n, inte de råa ax/ay (de används bara internt för kalibreringsdiagnostik).
+        # lämna av tung vy/inspelning till writer-tråden (icke-kritisk väg).
+        # ax_s/ay_s (kamera-offset-korrigerade, det som faktiskt skickades — or the
+        # synthetic angles while coasting) loggas i CSV:n, inte de råa ax/ay (de används
+        # bara internt för kalibreringsdiagnostik).
         if need_video and bgr is not None:
-            self._enqueue((bgr, target, phase, agl_eff,
-                           self._recording, ox, oy, ax_s, ay_s, time.time(),
-                           tel_snap, yaw_err_deg, yaw_cmd_deg,
-                           self._loop_hz, self._lat_ms, agl_src, mrange, magl))
+            self._enqueue(dict(
+                bgr=bgr, target=target, phase=phase, agl=agl_eff, recording=self._recording,
+                ox=ox, oy=oy, ax=ax_s, ay=ay_s, t=time.time(), tel=tel_snap,
+                yaw_err_deg=yaw_err_deg, yaw_cmd_deg=yaw_cmd_deg,
+                loop_hz=self._loop_hz, lat_ms=self._lat_ms, agl_src=agl_src,
+                mrange=mrange, magl=magl, sent=sent, source=source, coast_uv=coast_uv,
+                moving=moving, drone_ned=drone_ned, pad_ned=pad_ned,
+                pad_vel=self._pad.velocity()))
 
-    def _decide_phase(self, agl):
+    def _decide_phase(self, agl, moving=False):
         if agl is None:                        # ingen AGL (t.ex. bänk utan TF-Luna) -> detektera ändå
             return PHASE_ARUCO
-        if agl < self._rtk_agl:
-            return PHASE_RTK
+        if agl < self._rtk_agl and not moving:  # moving pad: "RTK holds x/y" makes no sense,
+            return PHASE_RTK                    # keep sending down to touchdown
         if agl > self._aruco_start_agl:
             return PHASE_WAIT
         return PHASE_ARUCO
@@ -759,9 +966,8 @@ class PrecLandController:
                     if writer is not None and not self._recording:
                         writer.release(); csvf.close(); writer = csvf = None
                     continue
-                (bgr, target, phase, agl, recording,
-                 ox, oy, ax, ay, t, tel, yaw_err_deg, yaw_cmd_deg,
-                 loop_hz, lat_ms, agl_src, mrange, magl) = item
+                bgr, target, phase, agl, recording = (
+                    item["bgr"], item["target"], item["phase"], item["agl"], item["recording"])
 
                 do_push = False
                 if self.cam.viewers > 0:
@@ -775,7 +981,8 @@ class PrecLandController:
                 # (t.ex. en enqueue som bara nådde tröskeln pga inspelning medan preview-
                 # takten redan har sin egen frame nyss).
                 undist = self._preview_maps is not None
-                out = (self.det.annotate(bgr, target, phase=phase, agl=agl, text=not undist)
+                out = (self.det.annotate(bgr, target, phase=phase, agl=agl, text=not undist,
+                                         coast_uv=item["coast_uv"])
                        if (do_push or recording) else None)
 
                 if do_push:
@@ -794,9 +1001,7 @@ class PrecLandController:
                     if writer is None:
                         writer, csvf = self._open_recording()
                     writer.write(out)
-                    csvf.write(self._row(t, tel, agl, phase, target,
-                                         ox, oy, ax, ay, yaw_err_deg, yaw_cmd_deg,
-                                         loop_hz, lat_ms, agl_src, mrange, magl))
+                    csvf.write(self._row(item))
                 elif writer is not None:
                     writer.release(); csvf.close(); writer = csvf = None
         finally:
@@ -805,20 +1010,25 @@ class PrecLandController:
             if csvf is not None:
                 csvf.close()
 
-    def _row(self, t, tel, agl, phase, target, ox, oy, ax, ay,
-             yaw_err_deg, yaw_cmd_deg, loop_hz, lat_ms, agl_src=None, mrange=None, magl=None):
-        sent = phase == PHASE_ARUCO and target is not None
+    def _row(self, it):
+        tel, mrange, ax, ay = it["tel"], it["mrange"], it["ax"], it["ay"]
+        dn = [float(v) for v in it["drone_ned"]] if it["drone_ned"] is not None else [None] * 3
+        pn = [float(v) for v in it["pad_ned"]] if it["pad_ned"] is not None else [None] * 3
+        pv = it["pad_vel"] or (None, None)
         return ",".join([
-            "%.3f" % t, str(tel.get("mode", "")), "1",
+            "%.3f" % it["t"], str(tel.get("mode", "")), "1",
             _f(tel.get("roll")), _f(tel.get("pitch")), _f(tel.get("yaw")), _f(tel.get("heading")),
-            _f(tel.get("alt")), _f(agl), _f(tel.get("voltage")), _f(tel.get("battery_remaining")),
-            _f(tel.get("fix_type")), _f(tel.get("satellites")), phase or "",
-            (target.source if target else ""), _f(ox), _f(oy),
+            _f(tel.get("alt")), _f(it["agl"]), _f(tel.get("voltage")), _f(tel.get("battery_remaining")),
+            _f(tel.get("fix_type")), _f(tel.get("satellites")), it["phase"] or "",
+            it["source"] or "", _f(it["ox"]), _f(it["oy"]),
             _f(math.degrees(ax) if ax is not None else None),
-            _f(math.degrees(ay) if ay is not None else None), "1" if sent else "0",
-            "%.2f" % self._cmd_scale, _f(yaw_err_deg), _f(yaw_cmd_deg),
-            "1" if self._yaw_align else "0", _f(loop_hz, 1), _f(lat_ms, 1),
-            agl_src or "", _f(mrange[0] if mrange else None), _f(magl),
+            _f(math.degrees(ay) if ay is not None else None), "1" if it["sent"] else "0",
+            "%.2f" % self._cmd_scale, _f(it["yaw_err_deg"]), _f(it["yaw_cmd_deg"]),
+            "1" if self._yaw_align else "0", _f(it["loop_hz"], 1), _f(it["lat_ms"], 1),
+            it["agl_src"] or "", _f(mrange[0] if mrange else None), _f(it["magl"]),
+            "1" if it["moving"] else "0", _f(tel.get("groundspeed")),
+            _f(dn[0]), _f(dn[1]), _f(dn[2]), _f(pn[0]), _f(pn[1]), _f(pn[2]),
+            _f(pv[0]), _f(pv[1]),
         ]) + "\n"
 
 

@@ -139,6 +139,28 @@
             Adjust live. Logged in the CSV.</div>
         </div>
 
+        <div class="card" id="target-card">
+          <h2>Target mode</h2>
+          <label class="row chk">
+            <span>Moving pad (rover / car)</span>
+            <input type="checkbox" id="tm-moving">
+          </label>
+          <div class="row"><span>Pad speed</span><b><span id="tm-speed">–</span> m/s</b></div>
+          <div class="row"><span>Pad heading</span><b><span id="tm-heading">–</span>°</b></div>
+          <div class="row"><span>Drone groundspeed</span><b><span id="tm-gs">–</span> m/s</b></div>
+          <div class="row"><span>Tracker</span><b><span id="tm-track">–</span></b></div>
+          <div class="slider-row">
+            <div class="slider-lbl"><span>Coast after marker lost</span><b><span id="tm-coast-val">3.0</span></b> s</div>
+            <input type="range" id="tm-coast" min="0" max="8" step="0.5" value="3">
+          </div>
+          <div class="hint-sm">Off = static pad, the flight-proven behaviour. On = keep sending
+            below the RTK threshold, use the marker's own range (raised pad), and when the marker
+            leaves the frame keep sending an extrapolated target at the pad's last speed and
+            heading for the coast time (target shows "coast", yellow circle in the video).
+            Needs PLND_OPTIONS=7 on the FC (see MOVING-TARGET-LANDING.md). Pad speed is
+            estimated in both modes — should read ~0 over a static pad.</div>
+        </div>
+
         <div class="card" id="thresh-card">
           <h2>Altitude thresholds</h2>
           <div class="slider-row">

@@ -327,3 +327,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
   .panel { column-width: 150px; border-left: 0; border-top: 1px solid var(--line); }
   .map-side { border-left: 0; border-top: 1px solid var(--line); }
 }
+
+/* Target mode card: highlighted border while the moving-pad mode is on, so it can't be
+   left on by accident before a normal static-pad landing. */
+#target-card.moving { border-color: var(--warn); }
+#target-card.moving h2 { color: var(--warn); }

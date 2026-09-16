@@ -18,6 +18,9 @@ from pymavlink import mavutil
 DEFAULT_URL = "udpout:127.0.0.1:14551"
 ATTITUDE_HZ = 20   # HUD smoothness — ArduPilot's default ATTITUDE stream rate is
                    # only ~4Hz; the 921600 baud FC link has plenty of headroom for this.
+LOCAL_POS_HZ = 20  # LOCAL_POSITION_NED: drone position/velocity in the EKF's local NED
+                   # frame, used by precland's pad tracker (moving-target mode) to turn
+                   # each marker sighting into a pad position in a fixed frame.
 
 # ---- systemklocka från FC:ns GPS-tid (fallback, ingen RTC-batteri på Pi:n) ---------
 # Pi 5:ns inbyggda RTC har ingen batteribackup här → startar alltid om från noll (epok),
@@ -77,7 +80,9 @@ class MavlinkTelemetry:
                             self._connected = True
                         if not rate_requested and msg.get_type() == "HEARTBEAT" \
                                 and msg.get_srcComponent() == 1:
-                            self._request_attitude_rate(msg.get_srcSystem(), msg.get_srcComponent())
+                            sysid, compid = msg.get_srcSystem(), msg.get_srcComponent()
+                            self._request_rate(sysid, compid, mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE, ATTITUDE_HZ)
+                            self._request_rate(sysid, compid, mavutil.mavlink.MAVLINK_MSG_ID_LOCAL_POSITION_NED, LOCAL_POS_HZ)
                             rate_requested = True
             except Exception:
                 with self._lock:
@@ -92,15 +97,15 @@ class MavlinkTelemetry:
                 0, 0, 0,
             )
 
-    def _request_attitude_rate(self, sysid, compid):
-        """MAV_CMD_SET_MESSAGE_INTERVAL for ATTITUDE — pushes it well past ArduPilot's
-        default ~4Hz stream rate so the Pilot view HUD doesn't look choppy."""
+    def _request_rate(self, sysid, compid, msg_id, hz):
+        """MAV_CMD_SET_MESSAGE_INTERVAL — ATTITUDE well past ArduPilot's default ~4Hz
+        stream rate so the Pilot view HUD doesn't look choppy, LOCAL_POSITION_NED for the
+        pad tracker."""
         with self._send_lock:
             self.master.mav.command_long_send(
                 sysid, compid,
                 mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
-                mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE,
-                int(1e6 / ATTITUDE_HZ),
+                msg_id, int(1e6 / hz),
                 0, 0, 0, 0, 0,
             )
 
@@ -156,6 +161,11 @@ class MavlinkTelemetry:
         elif t == "GLOBAL_POSITION_INT":
             d["lat"] = msg.lat / 1e7
             d["lon"] = msg.lon / 1e7
+        elif t == "LOCAL_POSITION_NED":
+            # EKF-local NED, metres / m/s. `ned_t` = our receive time, so a consumer can
+            # extrapolate the position to its own timestamp with the velocity.
+            d["ned"] = (msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz)
+            d["ned_t"] = time.time()
         elif t == "MISSION_CURRENT":
             d["cur_wp"] = msg.seq
         elif t == "SYSTEM_TIME":

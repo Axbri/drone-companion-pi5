@@ -43,6 +43,7 @@ async function pollTelemetry() {
 
     if (hudOn) drawHud("hud-pilot", t.roll || 0, t.pitch || 0, t.heading || 0);
     drawADI("adi-precland", t.roll || 0, t.pitch || 0);
+    $("tm-gs").textContent = fmt(t.groundspeed, 1);
 
     if (t.cur_wp !== undefined && t.cur_wp !== lastCurWp) { lastCurWp = t.cur_wp; if (mapInited) drawCurWp(t.cur_wp); }
     updateMap(t);
@@ -289,8 +290,53 @@ async function pollPrecland() {
     $("yaw-err").textContent = p.yaw_err_deg != null ? p.yaw_err_deg : "–";
     seedThresholds(p.thresholds);
     seedCamOffset(p.cam_offset);
+    seedTargetMode(p.target_mode);
+    renderPad(p.pad);
   } catch (e) {}
 }
+
+// ---- target mode: static pad vs moving pad (rover/car) ---------------------
+const tmMovingEl = $("tm-moving"), tmCoastEl = $("tm-coast");
+let tmSeeded = false, tmTimer = null;
+
+function reflectTargetMode() {
+  $("tm-coast-val").textContent = Number(tmCoastEl.value).toFixed(1);
+  $("target-card").classList.toggle("moving", tmMovingEl.checked);
+}
+
+function sendTargetMode() {
+  fetch("/api/targetmode", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ moving: tmMovingEl.checked, coast_s: Number(tmCoastEl.value) }),
+  }).catch(() => {});
+}
+
+function seedTargetMode(m) {
+  if (!m || tmSeeded) return;
+  tmSeeded = true;
+  tmMovingEl.checked = !!m.moving;
+  tmCoastEl.value = m.coast_s;
+  reflectTargetMode();
+}
+
+function renderPad(pad) {
+  if (!pad) { $("tm-speed").textContent = $("tm-heading").textContent = $("tm-track").textContent = "–"; return; }
+  $("tm-speed").textContent = pad.speed != null ? Number(pad.speed).toFixed(2) : "–";
+  $("tm-heading").textContent = pad.heading != null ? pad.heading : "–";
+  let st = pad.coasting ? "COASTING" : (pad.speed != null ? "fit" : (pad.samples ? "collecting" : "no pad"));
+  if (pad.ned_src === "bench") st += " (bench: drone static)";
+  else if (!pad.ned_src) st += " (no NED)";
+  if (pad.age != null) st += ` · ${pad.samples} smp, ${pad.age}s`;
+  $("tm-track").textContent = st;
+}
+
+tmMovingEl.addEventListener("change", () => { reflectTargetMode(); sendTargetMode(); });
+tmCoastEl.addEventListener("input", () => {
+  reflectTargetMode();
+  clearTimeout(tmTimer);
+  tmTimer = setTimeout(sendTargetMode, 120);
+});
+reflectTargetMode();
 
 // ---- camera fore/aft offset from center of rotation ------------------------
 const camOff = $("cam-off");

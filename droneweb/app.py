@@ -259,6 +259,15 @@ def api_yawalign():
     ))
 
 
+@app.route("/api/targetmode", methods=["POST"])
+def api_targetmode():
+    want = request.get_json(force=True, silent=True) or {}
+    return jsonify(precland.set_target_mode(
+        moving=want.get("moving"),
+        coast_s=want.get("coast_s"),
+    ))
+
+
 @app.route("/api/record", methods=["POST"])
 def api_record():
     want = request.get_json(force=True, silent=True) or {}
