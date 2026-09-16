@@ -240,6 +240,12 @@ def api_camoffset():
     return jsonify(precland.set_cam_offset(want.get("offset_cm")))
 
 
+@app.route("/api/markersize", methods=["POST"])
+def api_markersize():
+    want = request.get_json(force=True, silent=True) or {}
+    return jsonify(precland.set_marker_size(want.get("marker_cm")))
+
+
 @app.route("/api/thresholds", methods=["POST"])
 def api_thresholds():
     want = request.get_json(force=True, silent=True) or {}

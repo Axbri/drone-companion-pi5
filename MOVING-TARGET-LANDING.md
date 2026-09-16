@@ -54,18 +54,20 @@ leaves the frame, keep feeding the FC an extrapolated target at constant velocit
 
 ## Changes
 
-### FC parameters (Mission Planner / MAVLink)
+### FC parameters (set via MAVLink 2026-09-16, Copter 4.6.3)
 
 ```
 PLND_OPTIONS   = 7      # bit0 moving target + bit1 resume after reposition + bit2 fast final descent
 PLND_STRICT    = 2      # hold position instead of landing blind if the target is lost
 PLND_RET_MAX   = 0      # retries go to a stale (static) position — pointless for a moving pad
-LAND_SPEED     = 40     # cm/s (from 25) — shrink the blind window; see table above
-WPNAV_SPEED    = 500    # cm/s — verify current value first; ≥ 2× pad speed
-WPNAV_ACCEL    = 200    # cm/s² — catch-up authority; 150 is probably fine too
+LAND_SPEED     = 40     # cm/s (was 25) — shrink the blind window; see table above
+WPNAV_SPEED    = 500    # already 500 (the August "200" was never applied); ≥ 2× pad speed
+WPNAV_ACCEL    = 150    # left as is
 PLND_LAG       = 0.05   # keep; Pi latency measured 44 ms median
-LOG_DISARMED   = 1      # temporarily, for the bench test below (PL log message)
+LOG_DISARMED   = 1      # only during bench step 2, set back to 0 afterwards (done)
 ```
+Other FC values read the same day: `LAND_ALT_LOW 130`, `LAND_SPEED_HIGH 100` (so `LAND_SPEED`
+only governs the last 1.3 m), `PLND_TIMEOUT 4`, `PLND_ALT_MIN 0.2`, `PLND_ALT_MAX 20`.
 
 Keep `PLND_EST_TYPE=1`, `PLND_ALT_MIN=0.2`, `PLND_XY_DIST_MAX=5`. Static-pad landings must still
 work with these settings (bit 0 estimates ~0 velocity for a static pad) — fly one regression
@@ -105,8 +107,34 @@ prediction error after 1.5 s of coasting, synthetic angles within 1° of a real 
 static pad → 0.02 m/s. Tick test: 30 sightings, marker lost, 40 coast ticks over 2.0 s then
 silence; static mode sends nothing after loss.
 
-CSV gains `moving, gs, dn, de, dd, pn, pe, pd, pvn, pve` (mode flag, FC groundspeed, drone
-NED, pad NED per sighting / prediction, fitted pad velocity) and `source = coast`.
+CSV gains `moving, gs, dn, de, dd, pn, pe, pd, pvn, pve, marker_cm` (mode flag, FC groundspeed,
+drone NED, pad NED per sighting / prediction, fitted pad velocity, marker size) and
+`source = coast`.
+
+**Marker size slider** (calibration card, 5–100 cm, default 30): the marker-derived range/AGL,
+the calibration card and hence moving-mode pad speed scale with it — set the bench marker's
+true size (14.5 cm) indoors, else they read off by the size ratio.
+
+## Bench results (2026-09-16)
+
+Drone on a table, disarmed, 14.5 cm marker on the floor 0.70 m below (≈ the 30 cm pad from
+1.5 m). Indoors the FC's EKF has no horizontal position (const-pos mode, GPS h_acc ~270 m)
+and sends no `LOCAL_POSITION_NED` — the tracker's disarmed "bench: drone static" fallback
+covers this; in the air the card must show `fit` without that suffix.
+
+**Step 1 — Pi tracker** (`rec_20260916_212758`): static 0.00 m/s; slides tracked with the right
+compass heading (nose = yaw); coast engaged on the first missed frame, sent for 3.0 s, `pn/pe`
+continued on the fitted line (worst step 2 cm), also bridged single-frame dropouts. Dark room →
+auto exposure → ~11 Hz loop (exposure-bound; 40 Hz with a lamp).
+
+**Step 2 — FC side** (FC log 45 after a reboot, `LOG_DISARMED=1`; Pi watch t = FC t − 100.4 s):
+`PL` units are cm / cm/s. Static: vX/vY within ±0.5. Slide toward the nose: FC vX +12…+18,
+Pi 0.13–0.19 m/s @ 358–6°. Backward: FC (−18.5, −3.1) = 0.19 m/s @ 189.5°, Pi 0.18 m/s @ 189°.
+Coast: the FC fused the Pi's synthetic targets as ordinary measurements (`mX` continued along
+the same −18 cm/s line, `TAcq=1`, no `EKFOutl`), then dead-reckoned 2.0 s more and reported
+`Target Lost` — confirming the hard-coded 2 s. Re-acquisition: `Target Found` → `Init Complete`
+takes **2 s** before `TAcq=1` again, so a gap > 2 s in flight costs ~4 s without corrections.
+`PLND_OPTIONS` bit 0 confirmed active (velocity estimated and carried through the coast).
 
 ### Pad and vehicle
 
@@ -123,7 +151,7 @@ NED, pad NED per sighting / prediction, fitted pad velocity) and `source = coast
 
 ## Test ladder
 
-1. **Bench, FC powered, not armed**, `LOG_DISARMED=1`: slide the pad under the drone at ~1 m/s.
+1. **DONE 2026-09-16** — Bench, FC powered, not armed, `LOG_DISARMED=1`: slide the pad under the drone at ~1 m/s.
    Dataflash `PL.vX/vY` should follow the pad velocity within a couple of seconds, `PL.TAcq=1`
    throughout, and the web card's pad speed/heading should agree with it and with the tape
    measure/stopwatch. Then cover the marker: target shows *coast*, the yellow circle keeps

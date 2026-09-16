@@ -126,7 +126,8 @@ CAM = CameraModel()
 # Kamerakalibrering: ArUco-markörens verkliga sidlängd (svarta fyrkanten), meter.
 # MÄT den utskrivna markören och sätt rätt värde — hela kalibreringen beror på detta.
 # 0.30 = landnings-markörens ArUco (flyg). Bänk-test-markören var 0.145.
-MARKER_M = 0.30
+MARKER_M = 0.30              # default; live-adjustable in the web UI (calibration card) so a
+MARKER_MIN_M, MARKER_MAX_M = 0.05, 1.0   # small bench marker gives honest ranges/speeds
 ASSUMED_F = FX               # antagen brännvidd (px) att jämföra uppmätt mot
 # Marker-derived range (Target.range_m) vs a tape measure on the bench, 2026-09-15: 1.02 m
 # at 1.00 and 2.04 m at 2.00 — a pure 2 % scale (no offset), i.e. the calibrated f is ~2 %
@@ -197,8 +198,8 @@ def _apply_cam_offset(ax, ay, agl, offset_fwd_m):
 
 # Marker corners in the marker's own frame, in the order cv2.SOLVEPNP_IPPE_SQUARE
 # requires (TL, TR, BR, BL with y up) — the same order ArUco returns image corners in.
-_MARKER_OBJ = np.array([[-0.5, 0.5, 0], [0.5, 0.5, 0], [0.5, -0.5, 0], [-0.5, -0.5, 0]],
-                       np.float64) * MARKER_M
+_MARKER_UNIT = np.array([[-0.5, 0.5, 0], [0.5, 0.5, 0], [0.5, -0.5, 0], [-0.5, -0.5, 0]],
+                        np.float64)
 
 
 class Target:
@@ -209,9 +210,9 @@ class Target:
         self.aruco_id, self.corners = aruco_id, corners
         self._pose = None
 
-    def range_m(self):
+    def range_m(self, marker_m=MARKER_M):
         """(los_range_m, axis_dist_m) from the marker's apparent size and shape: solvePnP
-        on the four undistorted corners (known MARKER_M square). los = straight-line
+        on the four undistorted corners (known marker_m square). los = straight-line
         distance camera→marker centre (what LANDING_TARGET.distance means), axis = its
         component along the optical axis (≈ AGL when the camera points straight down).
         None without corners or if the solve fails. Replaces the lidar above its range."""
@@ -219,7 +220,7 @@ class Target:
             return None
         if self._pose is None:
             img = CAM.normalize(self.corners).reshape(4, 1, 2)
-            ok, _, tvec = cv2.solvePnP(_MARKER_OBJ, img, np.eye(3), None,
+            ok, _, tvec = cv2.solvePnP(_MARKER_UNIT * marker_m, img, np.eye(3), None,
                                        flags=cv2.SOLVEPNP_IPPE_SQUARE)
             t = tvec.ravel() * MARKER_RANGE_SCALE
             self._pose = (float(np.linalg.norm(t)), float(t[2])) if ok and t[2] > 0 else False
@@ -511,7 +512,7 @@ CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
               "yaw_err_deg,yaw_cmd_deg,yaw_align,loop_hz,latency_ms,"
               "agl_src,mrange,magl,"       # agl = effective (lidar or marker); mrange = marker
                                          # line-of-sight range, magl = marker-derived AGL
-              "moving,gs,dn,de,dd,pn,pe,pd,pvn,pve\n")
+              "moving,gs,dn,de,dd,pn,pe,pd,pvn,pve,marker_cm\n")
               # moving = target mode (1 = moving pad); gs = FC groundspeed; dn/de/dd = drone
               # local NED at the frame time; pn/pe/pd = pad NED for this sighting (or the
               # coasted prediction when source = "coast"); pvn/pve = fitted pad velocity.
@@ -593,6 +594,7 @@ class PrecLandController:
         self._gain = CV_GAIN
         self._cmd_scale = CMD_SCALE_DEFAULT   # styrskala för LANDING_TARGET (live)
         self._cam_offset_m = CAM_OFFSET_DEFAULT_CM / 100.0   # kamerans fram/bak-offset från CG
+        self._marker_m = MARKER_M                            # marker side length (live, bench vs pad)
         self._aruco_start_agl = self.ARUCO_START_AGL_DEFAULT
         self._rtk_agl = self.RTK_AGL_DEFAULT
         self._yaw_start_agl = self.YAW_START_AGL_DEFAULT
@@ -643,6 +645,16 @@ class PrecLandController:
         if offset_cm is not None:
             self._cam_offset_m = float(max(CAM_OFFSET_MIN_CM, min(CAM_OFFSET_MAX_CM, offset_cm))) / 100.0
         return self.cam_offset_status()
+
+    def marker_status(self):
+        return {"marker_cm": round(self._marker_m * 100.0, 1)}
+
+    def set_marker_size(self, marker_cm=None):
+        """Marker side length (cm, the black square). Live — the marker-derived range/AGL and
+        the calibration card scale with it, so a bench marker of another size reads true."""
+        if marker_cm is not None:
+            self._marker_m = float(max(MARKER_MIN_M, min(MARKER_MAX_M, marker_cm / 100.0)))
+        return self.marker_status()
 
     def threshold_status(self):
         return {"aruco_start_agl": round(self._aruco_start_agl, 1),
@@ -714,6 +726,7 @@ class PrecLandController:
         s["exposure"] = self.exposure_status()
         s["cmd_scale"] = round(self._cmd_scale, 2)
         s["cam_offset"] = self.cam_offset_status()
+        s["marker"] = self.marker_status()
         s["yaw_align"] = self.yaw_align_status()
         s["thresholds"] = self.threshold_status()
         s["target_mode"] = self.target_mode_status()
@@ -778,7 +791,7 @@ class PrecLandController:
         # this is what lets tracking start above the lidar's range. The lidar-only value
         # `agl` is kept for the calibration card (marker-derived would be circular there).
         agl = self.rf.agl() if self.rf else None
-        mrange = target.range_m() if target is not None else None
+        mrange = target.range_m(self._marker_m) if target is not None else None
         magl = None
         if mrange is not None:
             roll, pitch = tel_snap.get("roll"), tel_snap.get("pitch")
@@ -886,7 +899,7 @@ class PrecLandController:
             px = target.px_size()
             if px:
                 calib["px"] = round(px, 1)
-                calib["f_meas"] = round(px * agl / MARKER_M)
+                calib["f_meas"] = round(px * agl / self._marker_m)
 
         # Pi-latens (kamera-fångst → nu, strax efter skick) + verklig loop-takt, EWMA
         now = time.time()
@@ -1028,7 +1041,7 @@ class PrecLandController:
             it["agl_src"] or "", _f(mrange[0] if mrange else None), _f(it["magl"]),
             "1" if it["moving"] else "0", _f(tel.get("groundspeed")),
             _f(dn[0]), _f(dn[1]), _f(dn[2]), _f(pn[0]), _f(pn[1]), _f(pn[2]),
-            _f(pv[0]), _f(pv[1]),
+            _f(pv[0]), _f(pv[1]), "%.1f" % (self._marker_m * 100.0),
         ]) + "\n"
 
 

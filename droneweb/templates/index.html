@@ -223,7 +223,14 @@
           <div class="hint-sm">Point the camera straight down at the
             flat, centered ArUco marker (tracking always runs). <b>Measured focal length</b> should ~match the assumed value (~849). Scale error ≠ 1.0
             → the angles sent to ArduPilot are mis-scaled by that factor. <b>Ground offset</b> should match the measured
-            lateral offset with a tape measure. Requires the correct <code>MARKER_M</code> (the marker's true side length).</div>
+            lateral offset with a tape measure. Requires the correct marker size (below).</div>
+          <div class="slider-row">
+            <div class="slider-lbl"><span>Marker size (black square)</span><b><span id="mk-size-val">30.0</span></b> cm</div>
+            <input type="range" id="mk-size" min="5" max="100" step="0.5" value="30">
+          </div>
+          <div class="hint-sm">30 = the landing pad. Set the bench marker's true size when testing
+            indoors, else marker range, marker AGL and pad speed in moving mode are off by the ratio.
+            Live, logged in the CSV.</div>
           <div class="slider-row">
             <div class="slider-lbl"><span>Camera offset from center (+ = forward)</span><b><span id="cam-off-val">-16.5</span></b> cm</div>
             <input type="range" id="cam-off" min="-30" max="30" step="0.5" value="-16.5">

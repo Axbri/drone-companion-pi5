@@ -290,6 +290,7 @@ async function pollPrecland() {
     $("yaw-err").textContent = p.yaw_err_deg != null ? p.yaw_err_deg : "–";
     seedThresholds(p.thresholds);
     seedCamOffset(p.cam_offset);
+    seedMarker(p.marker);
     seedTargetMode(p.target_mode);
     renderPad(p.pad);
   } catch (e) {}
@@ -366,6 +367,35 @@ camOff.addEventListener("input", () => {
   camOffTimer = setTimeout(sendCamOffset, 120);
 });
 reflectCamOffset();
+
+// ---- marker size (30 cm pad vs a small bench marker) -----------------------
+const mkSize = $("mk-size");
+let mkSeeded = false, mkTimer = null;
+
+function reflectMarker() {
+  $("mk-size-val").textContent = Number(mkSize.value).toFixed(1);
+}
+
+function sendMarker() {
+  fetch("/api/markersize", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ marker_cm: Number(mkSize.value) }),
+  }).catch(() => {});
+}
+
+function seedMarker(m) {
+  if (!m || mkSeeded) return;
+  mkSeeded = true;
+  mkSize.value = m.marker_cm;
+  reflectMarker();
+}
+
+mkSize.addEventListener("input", () => {
+  reflectMarker();
+  clearTimeout(mkTimer);
+  mkTimer = setTimeout(sendMarker, 120);
+});
+reflectMarker();
 
 // ---- altitude thresholds (live-tunable while flying) ----------------------
 const thAruco = $("th-aruco"), thYaw = $("th-yaw"), thRtk = $("th-rtk");
