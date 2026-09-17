@@ -568,7 +568,8 @@ within 1–10 cm** despite wind (median tilt below 2 m 1.5–1.8° vs 0.5–0.8�
 
 ## Moving-target mode (2026-09-16, bench-tested, not yet flown)
 
-Web switch "Target mode → Moving pad" in the precland tab. Off = everything above, unchanged.
+Web switch "Target mode → Moving pad" in the precland tab (**on by default** since
+2026-09-17; untick for a static-pad comparison). Off = everything above, unchanged.
 On = no RTK-hold cut-off, marker range as `LANDING_TARGET.distance`, and Pi-side coasting
 (pad velocity tracked in the FC's local NED frame, extrapolated target sent after the marker is
 lost). Design, FC parameters (`PLND_OPTIONS=7`, `PLND_STRICT=2`, `PLND_RET_MAX=0`,

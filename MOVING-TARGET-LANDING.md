@@ -76,8 +76,9 @@ landing before any moving test. Add the values to the param backup once flown.
 ### Pi (`droneweb/precland.py`) — implemented 2026-09-16, not yet flight-tested
 
 A **Target mode** card in the precland tab: *Moving pad* checkbox (off = static pad = the
-flight-proven behaviour, byte-for-byte the same sending logic) and a *Coast after marker lost*
-slider (0–8 s, default 3). The card turns amber while moving mode is on.
+flight-proven behaviour, byte-for-byte the same sending logic; **on by default** since
+2026-09-17) and a *Coast after marker lost* slider (0–8 s, default 3). The card turns amber
+while moving mode is on.
 
 Moving mode changes three things:
 
@@ -178,8 +179,8 @@ Precision-Loiter follow at ~4.4 m, 5 LAND on the dragged pad (0.9–2.0 m/s), on
 faster pulls, overshoots when the pad stops abruptly, works hard on yaw when the pad twists on
 the grass.
 
-**Moving mode was OFF in every recording** (`moving=0`; the Pi boots in static mode and the
-switch is not persistent). Everything below is therefore ArduPilot's own velocity feed-forward
+**Moving mode was OFF in every recording** (`moving=0`; the Pi booted in static mode and the
+switch is not persistent — default changed to ON afterwards, see Status). Everything below is therefore ArduPilot's own velocity feed-forward
 (`PLND_OPTIONS` bit 0) plus the new FC params — the Pi's coasting / marker-range path is still
 unflown. Yaw-align was on.
 
@@ -213,7 +214,8 @@ the coast is exercised; then look at the chase oscillation (`PLND_LAG`, `PLND_AC
 Bench steps 1–2 done 2026-09-16, flight test #1 2026-09-17 (see above): static regression OK,
 follow + dragged-pad landings OK with the FC's feed-forward alone; Pi moving mode not yet
 exercised in flight. FC is in flight configuration (`LOG_DISARMED=0`),
-Pi defaults to static mode / 30 cm marker at every restart.
+Pi defaults to **moving mode ON** (since 2026-09-17, so it is not forgotten; harmless on a
+static pad) and 30 cm marker at every restart. Untick it for a static-pad comparison landing.
 
 ## Open points
 

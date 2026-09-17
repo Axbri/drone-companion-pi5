@@ -603,7 +603,11 @@ class PrecLandController:
         self._last_yaw_tx = 0.0
         # Target mode (web switch): False = static pad, exactly the flight-proven behaviour.
         # True = moving pad, see the "moving-target mode" comment block above PadTracker.
-        self._moving = False
+        # Default ON since 2026-09-17: flight test #1 was flown with it off by mistake (not
+        # persistent, Pi had rebooted). Harmless on a static pad — the marker is not visible
+        # below the RTK threshold anyway, and a coast only starts after an actively-sent
+        # sighting — so ON is the safer default for the test campaign.
+        self._moving = True
         self._coast_s = COAST_DEFAULT_S
         self._pad = PadTracker()
         self._coast_ok = False                # last sighting was actively sent → may coast
