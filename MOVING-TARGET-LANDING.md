@@ -170,10 +170,49 @@ takes **2 s** before `TAcq=1` again, so a gap > 2 s in flight costs ~4 s without
 Abort at every step: mode switch to LOITER. Keep the rover's path clear of people; the drone
 descends along it.
 
+## Flight test #1 — pad dragged on a rope (2026-09-17)
+
+Eight recordings (`rec_20260917_175409` … `180452`): 2 static-pad landings, one 152 s
+Precision-Loiter follow at ~4.4 m, 5 LAND on the dragged pad (0.9–2.0 m/s), one aborted LAND
+(pad never in view). Pilot's verdict: hits within 30–40 cm every time, tracks slow walk and
+faster pulls, overshoots when the pad stops abruptly, works hard on yaw when the pad twists on
+the grass.
+
+**Moving mode was OFF in every recording** (`moving=0`; the Pi boots in static mode and the
+switch is not persistent). Everything below is therefore ArduPilot's own velocity feed-forward
+(`PLND_OPTIONS` bit 0) plus the new FC params — the Pi's coasting / marker-range path is still
+unflown. Yaw-align was on.
+
+- **Tracker in flight:** `LOCAL_POSITION_NED` flows (EKF has GPS). Hovering over the static pad:
+  pad speed 0.01–0.03 m/s. During a dynamic descent over the static pad: 0.05–0.2 m/s (attitude/
+  position timing noise) — good enough for a 1–2 s coast at 1–2 m/s. Pulls read 0.9, 1.3,
+  1.5 → 3.9 m/s with the direction of the rope.
+- **Follow (LOITER):** matched 0.9–1.5 m/s with the marker within ±0.3 of frame centre. Stop
+  from 1 m/s → 0.85 m overshoot; stop from 3+ m/s → 2.3 m. At 3.9 m/s the drone lagged 1.5 m,
+  the marker left the bottom of the frame, **lost for 7 s**, FC braked to a stop after 2 s —
+  reacquired only because the pilot stopped the pad inside the 4.3 m footprint. 2 m/s is the
+  realistic ceiling with the current controller dynamics.
+- **Landings:** last sighting always at **0.50–0.68 m AGL** with `oy` −0.55…−0.63 (marker
+  parked at the top of the frame exactly where the CG-offset geometry puts it, then its quiet
+  zone leaves the frame). Touchdown **0.9–1.7 s later** — inside the FC's 2 s dead-reckoning, so
+  the target was never lost before touchdown. Lateral offset at the last sighting `ox`
+  −0.06…−0.46 (≈ 3–30 cm at that height): most of the 30–40 cm is the **chase oscillation**
+  during the descent (ox swinging ±0.3–0.4 with ~2.5 s period, roll/pitch ±6–10° at 2 m/s),
+  not the blind phase. After touchdown at 2 m/s the pitch read −27…−29° for a second (drone on
+  the pad being dragged over grass).
+- Detection 3–20 m: 70–100 %, max gap 1.6 s (close to the 2 s limit — coasting matters here too).
+- Yaw: converged 178° → 2° during the descent in LAND even with the pad twisting; in LOITER the
+  drone does not yaw (CONDITION_YAW is LAND/RTL-only by design), `yaw_err` just tracks the twist.
+
+Next: fly the same with **Moving pad ON** (tick it after every Pi boot — card turns amber) so
+the coast is exercised; then look at the chase oscillation (`PLND_LAG`, `PLND_ACC_P_NSE`,
+`PSC_VELXY_*`) — that, not the blind window, is what limits the 30–40 cm now.
+
 ## Status
 
-Bench steps 1–2 done 2026-09-16 (see above). Flight steps 3–5 from 2026-09-17, recorded with
-the web Record button, analysed afterwards. FC is in flight configuration (`LOG_DISARMED=0`),
+Bench steps 1–2 done 2026-09-16, flight test #1 2026-09-17 (see above): static regression OK,
+follow + dragged-pad landings OK with the FC's feed-forward alone; Pi moving mode not yet
+exercised in flight. FC is in flight configuration (`LOG_DISARMED=0`),
 Pi defaults to static mode / 30 cm marker at every restart.
 
 ## Open points
