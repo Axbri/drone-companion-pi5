@@ -60,12 +60,15 @@ leaves the frame, keep feeding the FC an extrapolated target at constant velocit
 PLND_OPTIONS   = 7      # bit0 moving target + bit1 resume after reposition + bit2 fast final descent
 PLND_STRICT    = 2      # hold position instead of landing blind if the target is lost
 PLND_RET_MAX   = 0      # retries go to a stale (static) position — pointless for a moving pad
-LAND_SPEED     = 40     # cm/s (was 25) — shrink the blind window; see table above
+LAND_SPEED     = 30     # cm/s (was 25; 40 on 2026-09-17 flew fine but touched down hard — set
+                        # to 30 on 2026-09-18: blind window ~1.8 s, still inside the FC's own 2 s
+                        # even without the Pi coast, softer touchdown)
 WPNAV_SPEED    = 500    # already 500 (the August "200" was never applied); ≥ 2× pad speed
 WPNAV_ACCEL    = 150    # left as is
 PLND_LAG       = 0.05   # keep; Pi latency measured 44 ms median
 LOG_DISARMED   = 1      # only during bench step 2, set back to 0 afterwards (done)
 ```
+Set from the Pi with `tools/fc_params.py` (`get`/`set` through mavproxy's tcp:5760).
 Other FC values read the same day: `LAND_ALT_LOW 130`, `LAND_SPEED_HIGH 100` (so `LAND_SPEED`
 only governs the last 1.3 m), `PLND_TIMEOUT 4`, `PLND_ALT_MIN 0.2`, `PLND_ALT_MAX 20`.
 

@@ -50,6 +50,7 @@ drone-ntrip-pi/
 ├── MOVING-TARGET-LANDING.md      — landning på rörlig platta: ArduPilot-analys, FC-params, Pi-coasting, testplan
 ├── droneweb/                     — companion-webappen: app.py, camera.py, mavlink.py, precland.py, rangefinder.py, templates/, static/
 ├── landing-marker/               — utskrivbar landningsmarkör + platta (ArUco DICT_4X4_50 ID0) + generator
+├── tools/fc_params.py            — läs/sätt ArduPilot-params från Pi:n (via mavproxys tcp:5760)
 ├── cube-full-params-*.param      — full ArduPilot-param-backup (MP-format)
 ├── mediamtx.yml                  — LEGACY kamera-/RTSP-konfig (ersatt av droneweb, se nedan)
 └── systemd/
