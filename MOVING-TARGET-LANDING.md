@@ -40,15 +40,16 @@ in `PRECISION-LANDING.md`). So tracking effectively ends at ~0.6 m and the FC de
 | Final descent rate | Blind time for 0.6 m | Verdict |
 |---|---|---|
 | 10 cm/s (precland slow-down rule) | 6 s | target lost → brake → lands 1–2 m behind the pad |
-| 25 cm/s (current `LAND_SPEED`) | 2.4 s | lost just before touchdown |
-| 40 cm/s | 1.5 s | OK with margin |
+| 25 cm/s (`LAND_SPEED` before 2026-09-16) | 2.4 s | lost just before touchdown |
+| 30 cm/s (**current**, since 2026-09-18) | 1.8 s | inside the FC's 2 s, margin from the Pi coast |
+| 40 cm/s (flown 2026-09-17) | 1.5 s | OK with margin, but hard touchdown |
 | 50 cm/s | 1.2 s | OK |
 
 Braking at `WPNAV_ACCEL=150` from 2 m/s takes 1.3 s / 1.3 m, so a timeout at touchdown means
 landing well behind the pad or being dragged off it. Decision (2026-09-16): keep the single
 30 cm marker (with the wide lens it stays in view until the gear is ~20 cm above the pad, so
 the blind window is short), descend faster near the ground (`PLND_OPTIONS` bit 2 +
-`LAND_SPEED` 40), and have the **Pi coast** — track the pad's velocity and, once the marker
+`LAND_SPEED` 30–40), and have the **Pi coast** — track the pad's velocity and, once the marker
 leaves the frame, keep feeding the FC an extrapolated target at constant velocity. The FC's own
 2 s dead reckoning is then a backup behind the Pi's, not the only thing holding the landing.
 
@@ -76,7 +77,7 @@ Keep `PLND_EST_TYPE=1`, `PLND_ALT_MIN=0.2`, `PLND_XY_DIST_MAX=5`. Static-pad lan
 work with these settings (bit 0 estimates ~0 velocity for a static pad) — fly one regression
 landing before any moving test. Add the values to the param backup once flown.
 
-### Pi (`droneweb/precland.py`) — implemented 2026-09-16, not yet flight-tested
+### Pi (`droneweb/precland.py`) — implemented 2026-09-16; flown 2026-09-17 with the mode off, coast path still unflown
 
 A **Target mode** card in the precland tab: *Moving pad* checkbox (off = static pad = the
 flight-proven behaviour, byte-for-byte the same sending logic; **on by default** since

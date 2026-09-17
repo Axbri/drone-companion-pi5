@@ -489,7 +489,7 @@ Six landings analysed (`rec_20260915_183127` … `184145`, 3× LAND, 3× RTL, al
 
 No code or parameter changes needed.
 
-## Lens calibration — IMX296 fisheye (2026-09-15, not yet flight-tested)
+## Lens calibration — IMX296 fisheye (2026-09-15; flown 2026-09-17, all landings, no issues)
 
 Tools in `camera-calibration/`: `calib_board.py` (A4 ChArUco board, 7x5, DICT_5X5_100),
 `calib_capture.py` (auto-captures views on the Pi with a live overlay at :8081, droneweb stopped),
@@ -511,7 +511,11 @@ image edges the bearing was 9° too small (36° vs 45° at the right edge) — e
 lens now acquires markers 3 m off at 8 m AGL. Redo the capture+solve if the lens is moved or
 refocused (`square` = measured square size).
 
-## Marker-derived AGL — tracking above the lidar's range (2026-09-15, not yet flight-tested)
+## Marker-derived AGL — tracking above the lidar's range (2026-09-15; flight-verified 2026-09-17)
+
+> **Flight-verified 2026-09-17:** first acquisition at 10–14.8 m AGL (`agl_src=marker`,
+> `mrange` 10.2–15.0 m) in 6 of 8 recordings, `LANDING_TARGET` sent from there down to the
+> lidar hand-over at ~8 m, no retries, clean descents. `PLND_ALT_MAX` is 20 on the FC.
 
 Goal: start correcting toward the pad from higher than the TF-Luna's 8 m. ArduPilot
 (`AC_PrecLand::construct_pos_meas_using_rangefinder`) needs either a valid rangefinder or
@@ -566,7 +570,7 @@ within 1–10 cm** despite wind (median tilt below 2 m 1.5–1.8° vs 0.5–0.8�
   Confirm from the dataflash `PL` messages if it matters.
 - Loop 23.5 Hz median (p10 9.7, grass at low AGL), latency 49 ms median.
 
-## Moving-target mode (2026-09-16, bench-tested, not yet flown)
+## Moving-target mode (2026-09-16; bench-tested, flown 2026-09-17 with the mode off)
 
 Web switch "Target mode → Moving pad" in the precland tab (**on by default** since
 2026-09-17; untick for a static-pad comparison). Off = everything above, unchanged.
