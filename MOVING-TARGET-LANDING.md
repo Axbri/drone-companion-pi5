@@ -167,12 +167,12 @@ takes **2 s** before `TAcq=1` again, so a gap > 2 s in flight costs ~4 s without
    moving with the (hidden) pad, sending stops after the coast time. Validates
    `PLND_OPTIONS`, EKF velocity, the marker-range `distance` and the Pi tracker without
    flying. Also confirms the Pi's loop rate is unaffected (`loop_hz`).
-2. **Static pad, new params**: one LAND regression. Check the final-metre descent rate (CSV `agl`
+2. **DONE 2026-09-17** — Static pad, new params: one LAND regression. Check the final-metre descent rate (CSV `agl`
    vs `t`) — this is the blind-window number.
-3. **Slow pad**: pad on a cart pulled by a ≥ 10 m rope at 0.5 m/s. First Precision-Loiter at
+3. **DONE 2026-09-17/21** (pad dragged on a rope, 0.9–1.9 m/s) — Slow pad: pad on a cart pulled by a ≥ 10 m rope at 0.5 m/s. First Precision-Loiter at
    3–4 m (tracking only, no descent), then LAND from 3 m. Analyse: `PL.vX/vY` vs actual speed,
    CSV `ox/oy` during descent, last-detection AGL, touchdown offset on the pad.
-4. **1 m/s, then 2 m/s** (rover or car). Then from 8 m.
+4. **1–2 m/s done 2026-09-21 (dragged pad, from ~10 m)**; rover/car and a proper cart still to do.
 5. In the CSVs: last real sighting AGL, coast duration, `pn/pe` continuity across the
    real→coast transition, and touchdown offset on the pad. Tune `coast_s`/`LAND_SPEED` from that.
 
@@ -213,9 +213,9 @@ unflown. Yaw-align was on.
 - Yaw: converged 178° → 2° during the descent in LAND even with the pad twisting; in LOITER the
   drone does not yaw (CONDITION_YAW is LAND/RTL-only by design), `yaw_err` just tracks the twist.
 
-Next: fly the same with **Moving pad ON** (tick it after every Pi boot — card turns amber) so
-the coast is exercised; then look at the chase oscillation (`PLND_LAG`, `PLND_ACC_P_NSE`,
-`PSC_VELXY_*`) — that, not the blind window, is what limits the 30–40 cm now.
+Next (done 2026-09-21, flight test #2 below): fly the same with **Moving pad ON**. Still open:
+the chase oscillation (`PLND_LAG`, `PLND_ACC_P_NSE`, `PSC_VELXY_*`) — that, not the blind
+window, is what limits the 30–40 cm.
 
 ## Flight test #2 — moving mode on (2026-09-21)
 

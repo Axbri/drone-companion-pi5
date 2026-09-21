@@ -570,7 +570,7 @@ within 1–10 cm** despite wind (median tilt below 2 m 1.5–1.8° vs 0.5–0.8�
   Confirm from the dataflash `PL` messages if it matters.
 - Loop 23.5 Hz median (p10 9.7, grass at low AGL), latency 49 ms median.
 
-## Moving-target mode (2026-09-16; bench-tested, flown 2026-09-17 with the mode off)
+## Moving-target mode (2026-09-16; flown 2026-09-17 mode off, 2026-09-21 mode on)
 
 Web switch "Target mode → Moving pad" in the precland tab (**on by default** since
 2026-09-17; untick for a static-pad comparison). Off = everything above, unchanged.
@@ -580,6 +580,10 @@ lost). Design, FC parameters (`PLND_OPTIONS=7`, `PLND_STRICT=2`, `PLND_RET_MAX=0
 `LAND_SPEED=40` — set on the FC 2026-09-16, they also apply to static landings), CSV columns,
 bench results and the test ladder: [`MOVING-TARGET-LANDING.md`](MOVING-TARGET-LANDING.md).
 The pad-velocity readout runs in both modes and should read ~0 over a static pad.
+Flight test #2 (2026-09-21): coast works; the slow disarm on a moving pad traced to
+`PLND_STRICT=2` (now 0) plus a Pi-side "touchdown ends the coast" rule — details in the
+moving-target doc. **Note for static landings too:** `PLND_STRICT=0` means a lost target now
+lands vertically instead of hovering.
 
 ## Uppskjutet
 - **Nästlad liten markör** för spårning ännu lägre än RTK-håll.
