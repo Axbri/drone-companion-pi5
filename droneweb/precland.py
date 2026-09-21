@@ -288,6 +288,20 @@ COAST_DEFAULT_S = 3.0     # how long to keep sending after the marker is lost (m
 COAST_MIN_S, COAST_MAX_S = 0.0, 8.0
 COAST_MIN_DOWN_M = 0.05   # don't synthesise a target that isn't below the drone
 
+# Touchdown ends the coast (2026-09-21). Flight test #2: after touchdown on a moving pad the
+# coast kept feeding a target moving at pad speed for 3 s; once the pad stopped that target
+# ran away from the drone, the FC (then in its lost-target retry/failsafe logic) demanded a
+# 30° lean toward it, and the land detector's large-angle veto kept the drone armed for
+# 6-16 s (FC log 48). Rule: in moving mode, in LAND, with the last sighting below TD_MAX_AGL,
+# once the FC's own EKF vertical speed (LOCAL_POSITION_NED vz) has been ~0 for TD_HOLD_S
+# the drone is taken as touched down and no more coast targets are sent. LAND never hovers
+# below 1 m (fast-descent option on the FC), so a still drone there is a landed drone.
+# Deliberately NOT lidar-based and it never disarms anything — a false trigger only ends
+# the coast early, after which the FC lands vertically (PLND_STRICT=0).
+TD_VZ_MAX = 0.15          # m/s, |vz| below this counts as "not descending"
+TD_HOLD_S = 0.5           # s of ~0 vertical speed before touchdown is declared
+TD_MAX_AGL = 1.0          # m, last sighting must have been below this
+
 
 def _rot_body_to_ned(roll_deg, pitch_deg, yaw_deg):
     """Body (FRD) → NED direction-cosine matrix, Rz(yaw)·Ry(pitch)·Rx(roll)."""
@@ -512,7 +526,7 @@ CSV_HEADER = ("t,mode,armed,roll,pitch,yaw,heading,alt,agl,batt_v,batt_pct,"
               "yaw_err_deg,yaw_cmd_deg,yaw_align,loop_hz,latency_ms,"
               "agl_src,mrange,magl,"       # agl = effective (lidar or marker); mrange = marker
                                          # line-of-sight range, magl = marker-derived AGL
-              "moving,gs,dn,de,dd,pn,pe,pd,pvn,pve,marker_cm\n")
+              "moving,gs,dn,de,dd,pn,pe,pd,pvn,pve,marker_cm,td\n")
               # moving = target mode (1 = moving pad); gs = FC groundspeed; dn/de/dd = drone
               # local NED at the frame time; pn/pe/pd = pad NED for this sighting (or the
               # coasted prediction when source = "coast"); pvn/pve = fitted pad velocity.
@@ -611,6 +625,9 @@ class PrecLandController:
         self._coast_s = COAST_DEFAULT_S
         self._pad = PadTracker()
         self._coast_ok = False                # last sighting was actively sent → may coast
+        self._last_sight_agl = None           # effective AGL at the last real sighting
+        self._td_since = None                 # when |vz| first dropped below TD_VZ_MAX
+        self._touchdown = False               # touched down → coast suppressed (moving mode)
         self._lat_ms = None                   # Pi-latens (kamera-fångst → skick), EWMA
         self._loop_hz = None                  # verklig loop-takt, EWMA
         self._last_tick = None
@@ -843,6 +860,8 @@ class PrecLandController:
                 drone_ned, R, _ = dr
                 pad_ned = self._pad.add(t_frame, pad_body, drone_ned, R)
             self._coast_ok = phase == PHASE_ARUCO         # only an actively-sent sighting may start a coast
+            self._last_sight_agl = agl_eff
+            self._td_since, self._touchdown = None, False   # marker in view → airborne
 
             if phase == PHASE_ARUCO:
                 k = self._cmd_scale                      # styrskala: mildare korrektion
@@ -872,7 +891,8 @@ class PrecLandController:
                         if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
                             self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
                             self._last_yaw_tx = now_yaw
-        elif moving and self._coast_s > 0 and self._coast_ok and dr is not None:
+        elif moving and self._coast_s > 0 and self._coast_ok and dr is not None \
+                and not self._touchdown_check(tel_snap, t_frame):
             # Marker lost in moving mode: coast. Extrapolate the pad at its fitted velocity
             # and keep the FC fed with a synthetic LANDING_TARGET for at most coast_s after
             # the last sighting, so its (hard-coded 2 s) target-lost timer never fires in the
@@ -921,7 +941,8 @@ class PrecLandController:
         pad_st = self._pad.status()
         last_t = self._pad.last_t()
         pad_st.update(age=(round(t_frame - last_t, 1) if last_t is not None else None),
-                      coasting=coasting, ned_src=(dr[2] if dr is not None else None))
+                      coasting=coasting, ned_src=(dr[2] if dr is not None else None),
+                      touchdown=self._touchdown)
         source = "coast" if coasting else (target.source if target else None)
         with self._st_lock:
             self._status.update(
@@ -947,7 +968,25 @@ class PrecLandController:
                 loop_hz=self._loop_hz, lat_ms=self._lat_ms, agl_src=agl_src,
                 mrange=mrange, magl=magl, sent=sent, source=source, coast_uv=coast_uv,
                 moving=moving, drone_ned=drone_ned, pad_ned=pad_ned,
-                pad_vel=self._pad.velocity()))
+                pad_vel=self._pad.velocity(), touchdown=self._touchdown))
+
+    def _touchdown_check(self, tel_snap, t):
+        """True once the drone has touched down after the last sighting (see TD_* above).
+        Sticky until a new sighting, a mode other than LAND, or vertical motion again."""
+        ned, ned_t = tel_snap.get("ned"), tel_snap.get("ned_t")
+        if (tel_snap.get("mode") != "LAND" or self._last_sight_agl is None
+                or self._last_sight_agl > TD_MAX_AGL or ned is None or ned_t is None
+                or abs(t - ned_t) > NED_MAX_AGE_S):
+            self._td_since, self._touchdown = None, False
+            return False
+        if abs(ned[5]) < TD_VZ_MAX:
+            if self._td_since is None:
+                self._td_since = t
+            elif t - self._td_since >= TD_HOLD_S:
+                self._touchdown = True
+        else:
+            self._td_since, self._touchdown = None, False
+        return self._touchdown
 
     def _decide_phase(self, agl, moving=False):
         if agl is None:                        # ingen AGL (t.ex. bänk utan TF-Luna) -> detektera ändå
@@ -1045,7 +1084,7 @@ class PrecLandController:
             it["agl_src"] or "", _f(mrange[0] if mrange else None), _f(it["magl"]),
             "1" if it["moving"] else "0", _f(tel.get("groundspeed")),
             _f(dn[0]), _f(dn[1]), _f(dn[2]), _f(pn[0]), _f(pn[1]), _f(pn[2]),
-            _f(pv[0]), _f(pv[1]), "%.1f" % (self._marker_m * 100.0),
+            _f(pv[0]), _f(pv[1]), "%.1f" % (self._marker_m * 100.0), "1" if it["touchdown"] else "0",
         ]) + "\n"
 
 

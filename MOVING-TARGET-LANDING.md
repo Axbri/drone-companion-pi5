@@ -59,7 +59,11 @@ leaves the frame, keep feeding the FC an extrapolated target at constant velocit
 
 ```
 PLND_OPTIONS   = 7      # bit0 moving target + bit1 resume after reposition + bit2 fast final descent
-PLND_STRICT    = 2      # hold position instead of landing blind if the target is lost
+PLND_STRICT    = 0      # land vertically if the target is lost. Was 2 (hold) 2026-09-16..21:
+                        # on the ground that hold steers toward the pad's stale dead-reckoned
+                        # position → 30° lean request → land detector vetoed → armed for
+                        # 6-16 s after touchdown (flight test #2). In-air loss now lands blind
+                        # where it is — pilot aborts with the mode switch.
 PLND_RET_MAX   = 0      # retries go to a stale (static) position — pointless for a moving pad
 LAND_SPEED     = 30     # cm/s (was 25; 40 on 2026-09-17 flew fine but touched down hard — set
                         # to 30 on 2026-09-18: blind window ~1.8 s, still inside the FC's own 2 s
@@ -213,13 +217,51 @@ Next: fly the same with **Moving pad ON** (tick it after every Pi boot — card 
 the coast is exercised; then look at the chase oscillation (`PLND_LAG`, `PLND_ACC_P_NSE`,
 `PSC_VELXY_*`) — that, not the blind window, is what limits the 30–40 cm now.
 
+## Flight test #2 — moving mode on (2026-09-21)
+
+Nine recordings (`rec_20260921_171056` … `172315`): static pad, a 125 s follow, six dragged-pad
+landings at 1.1–1.9 m/s, `moving=1` throughout. Pilot: works well, coast works; but after
+landing on the moving pad the drone stayed armed, sometimes rocking/almost tipping, sometimes
+just idling the props.
+
+- **Coast:** engaged in every landing, bridged mid-descent gaps, ran 3.0 s after the last
+  sighting. Sightings now reach 0.36–0.67 m AGL (no RTK-hold cut-off).
+- **Disarm delay after touchdown:** static pad 3.5 s; moving pad 2.7 / 4.9 / 7.6 / 8.8 /
+  10.9 / **16.6 s**. In the worst case the drone sat perfectly still (pitch −2°, gs 0) for
+  13 s before disarming.
+- **Root cause (FC log 48, `tools/fc_log_landings.py` + `fc_log_window.py`):** throttle was at
+  0 the whole time (`motor_at_lower_limit` OK), but the **pitch request sat at −30°
+  (`ANGLE_MAX`)** from touchdown until 0.5 s before disarm: the position controller held a
+  target 1.2 m away and demanded 1.2 m/s toward it (`PSCN` target-pos −10.97 vs pos −9.76,
+  target-vel −1.21 = `PSC_POSXY_P` × error). A lean request > 15° is a land-detector veto
+  (`large_angle_request`). The target came from ArduPilot's lost-target handling under
+  `PLND_STRICT=2`: after `Target Lost` (Pi coast 3 s + FC 2 s after touchdown) it waits
+  `PLND_TIMEOUT`, then retry/failsafe steer toward the pad's *last dead-reckoned position* —
+  1.2 m ahead once the pad had been stopped. The static pad escapes because `LAND_COMPLETE`
+  fires before the 2 s target timeout. The rocking = the same lean request while the throttle
+  was still spooling down.
+- **Fixes:** `PLND_STRICT=0` (lost → land vertically → horizontal controller relaxes →
+  landed within ~1 s). Pi: **touchdown ends the coast** — in moving mode, in LAND, with the
+  last sighting < 1 m, once the FC's EKF vertical speed has been < 0.15 m/s for 0.5 s no more
+  coast targets are sent (`PadTracker` status `touchdown`, CSV `td`). Decided from
+  `LOCAL_POSITION_NED` vz, not the lidar, and it disarms nothing: a false trigger only ends
+  the coast early and the FC lands vertically. Both deployed 2026-09-21, not yet flown.
+- Still open for the rover: a landing-gear contact switch → Pi force-disarm, gated on switch
+  closed ≥ 100 ms AND LAND AND fresh valid lidar < 0.3 m AND vz ≈ 0 — a hung lidar (stale)
+  or a reflection (switch open) each veto; both failing at once bounds the drop to ~30 cm.
+  Speed-up only; not needed for the fix above.
+
 ## Status
 
-Bench steps 1–2 done 2026-09-16, flight test #1 2026-09-17 (see above): static regression OK,
-follow + dragged-pad landings OK with the FC's feed-forward alone; Pi moving mode not yet
-exercised in flight. FC is in flight configuration (`LOG_DISARMED=0`),
+Bench steps 1–2 done 2026-09-16, flight test #1 2026-09-17 (mode off), flight test #2
+2026-09-21 (mode on, coast works; slow disarm on the moving pad fixed with `PLND_STRICT=0` +
+touchdown-ends-coast, to be verified next flight). FC is in flight configuration (`LOG_DISARMED=0`),
 Pi defaults to **moving mode ON** (since 2026-09-17, so it is not forgotten; harmless on a
 static pad) and 30 cm marker at every restart. Untick it for a static-pad comparison landing.
+Log tools on the Pi (`/home/axel/tools/`, repo `tools/`): `fc_params.py`, `fc_logs.py`
+(list/download dataflash logs to `/home/axel/fclogs/`), `fc_log_landings.py` (events, TAcq,
+throttle before each disarm), `fc_log_window.py` (attitude request/actual, EKF velocity,
+position-controller targets in a time window).
 
 ## Open points
 
