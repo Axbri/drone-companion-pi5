@@ -301,6 +301,25 @@ COAST_MIN_DOWN_M = 0.05   # don't synthesise a target that isn't below the drone
 TD_VZ_MAX = 0.15          # m/s, |vz| below this counts as "not descending"
 TD_HOLD_S = 0.5           # s of ~0 vertical speed before touchdown is declared
 TD_MAX_AGL = 1.0          # m, last sighting must have been below this
+TD_LEVEL_DIST_M = 0.15    # fallback distance for the level target when the lidar has no reading
+
+# Why touchdown sends a LEVEL target instead of going silent (2026-09-24). Flight test #3
+# showed the 2026-09-21 fix was not enough: stopping the coast makes the FC's
+# target_acquired() expire, Copter then takes the non-precland branch of
+# land_run_horizontal_control() — `input_vel_accel_NE_m(0, 0)` — which FREEZES the position
+# target wherever it was, typically ~0.8 m ahead (where the pad was heading at touchdown).
+# The position P then demands 0.8 m/s, the velocity PID winds its I-term up to ANGLE_MAX, and
+# a lean request > 15° is exactly what the land detector vetoes (`large_angle_request`). The
+# only thing that would relax the target, `NE_soften_for_landing()`, runs solely while
+# `land_complete_maybe` — which the same veto clears. Self-sustaining deadlock: measured 21 s
+# in FC log 50 (DesPitch pinned at -29° with ThO 0.00) and it never resolved on its own; every
+# disarm the pilot saw was their own.
+# Fix: keep feeding the FC a target that is "directly below me, not moving" — angles 0,
+# distance = lidar. target_acquired() stays true, so Copter keeps the precland branch,
+# `input_pos_vel_accel_NE_m(target_pos = our own position, vel = 0)` pulls the position target
+# onto the drone, the lean request collapses and the land detector can finish. Still no disarm
+# authority on the Pi and still not lidar-gated: a false trigger in the air only tells the FC
+# "the pad is straight down", i.e. descend vertically — what a lost target does anyway.
 
 
 def _rot_body_to_ned(roll_deg, pitch_deg, yaw_deg):
@@ -891,8 +910,16 @@ class PrecLandController:
                         if now_yaw - self._last_yaw_tx >= 1.0 / self.YAW_CMD_HZ:
                             self.tel.send_condition_yaw(yaw_cmd_deg, self._yaw_rate)
                             self._last_yaw_tx = now_yaw
-        elif moving and self._coast_s > 0 and self._coast_ok and dr is not None \
-                and not self._touchdown_check(tel_snap, t_frame):
+        elif moving and self._touchdown_check(tel_snap, t_frame):
+            # Touched down (see the TD_* block above): tell the FC the target is directly
+            # below us and stationary, so its position target follows the drone instead of
+            # staying frozen where the pad was going.
+            if tel_snap.get("armed") is not False:
+                dist = agl if (agl and agl > 0) else TD_LEVEL_DIST_M
+                self.tel.send_landing_target(0.0, 0.0, dist)
+                sent = True
+                self._tx += 1
+        elif moving and self._coast_s > 0 and self._coast_ok and dr is not None:
             # Marker lost in moving mode: coast. Extrapolate the pad at its fitted velocity
             # and keep the FC fed with a synthetic LANDING_TARGET for at most coast_s after
             # the last sighting, so its (hard-coded 2 s) target-lost timer never fires in the
@@ -943,7 +970,9 @@ class PrecLandController:
         pad_st.update(age=(round(t_frame - last_t, 1) if last_t is not None else None),
                       coasting=coasting, ned_src=(dr[2] if dr is not None else None),
                       touchdown=self._touchdown)
-        source = "coast" if coasting else (target.source if target else None)
+        source = ("coast" if coasting
+                  else "level" if (sent and target is None)      # touchdown: target held below us
+                  else (target.source if target else None))
         with self._st_lock:
             self._status.update(
                 phase=phase, source=source,

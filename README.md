@@ -51,7 +51,8 @@ drone-ntrip-pi/
 ├── droneweb/                     — companion-webappen: app.py, camera.py, mavlink.py, precland.py, rangefinder.py, templates/, static/
 ├── landing-marker/               — utskrivbar landningsmarkör + platta (ArUco DICT_4X4_50 ID0) + generator
 ├── tools/                        — Pi-verktyg: fc_params.py (params), fc_logs.py (hämta dataflash-loggar), fc_log_landings.py / fc_log_window.py (analys)
-├── cube-full-params-*.param      — full ArduPilot-param-backup (MP-format)
+├── cube-full-params-*.param      — full ArduPilot-param-backup (MP-format), senast 2026-09-24
+├── cube-pid-tune-*.param         — enbart tuning-params (PID/filter/notch/PSC), referens vid trimning av liknande drönare
 ├── mediamtx.yml                  — LEGACY kamera-/RTSP-konfig (ersatt av droneweb, se nedan)
 └── systemd/
     ├── mavproxy-ntrip.service    — autostart av MAVProxy + ntrip (+ droneweb-telemetri på :14551)
